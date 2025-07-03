@@ -3,6 +3,7 @@ import threading
 import time
 import uuid
 from resources.utils import MULTICAST_GROUP_ADDRESS
+from DiscoveryManager import ClientDiscovery
 
 class ChatClient:
     """Enhanced chat client with heartbeat and group view support"""
@@ -16,19 +17,22 @@ class ChatClient:
         self.heartbeat_interval = 30  # seconds
         
     def connect(self):
-        """Connect to the distributed chat system"""
+        """Connect to the distributed chat system with enhanced discovery"""
         try:
+            # Use enhanced discovery manager
+            client_discovery = ClientDiscovery(self.client_id, max_retries=3, timeout=5)
+            response = client_discovery.discover_servers()
+            
+            if response is None:
+                print("Failed to discover any servers")
+                return False
+            
+            # Create socket for communication
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.settimeout(10)
             
-            # Send join message
-            join_msg = "join"
-            self.socket.sendto(join_msg.encode(), MULTICAST_GROUP_ADDRESS)
-            
-            # Wait for response
-            response, server_addr = self.socket.recvfrom(1024)
-            print(f"Connected to server at {server_addr}")
-            print(f"Server response: {response.decode()}")
+            print(f"Successfully connected to distributed chat system")
+            print(f"Server response: {response}")
             
             self.connected = True
             

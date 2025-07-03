@@ -7,6 +7,7 @@ from resources.utils import server_last_seen
 from resources.utils import MULTICAST_GROUP_ADDRESS
 from LeaderElection import initialize_election, trigger_election, detect_leader_failure, get_current_leader
 from GroupView import get_group_view, start_group_view, print_system_status
+from DiscoveryManager import DiscoveryManager
 
 # Getting the IP address by trying to reach unreachable address, method from:https://stackoverflow.com/questions/166506/finding-local-ip-addresses-using-pythons-stdlib 
 def getIP():
@@ -110,18 +111,37 @@ if __name__ == '__main__':
     # Initialize election system
     initialize_election(server_id, server_IP)
     
-    start_server_discovery()
-    probe_servers()
+    # Initialize enhanced discovery manager
+    discovery_manager = DiscoveryManager(str(server_id), server_IP, socket.gethostname())
     
-    # Add this server to the group and trigger initial election
+    # Add discovery callbacks
+    def on_startup_complete():
+        print("Discovery startup phase completed")
+    
+    def on_server_discovered(discovered_server_id):
+        # Add to unified group view when server is discovered
+        group_view.add_participant(str(discovered_server_id), 'server', ('unknown', 0))
+    
+    discovery_manager.add_discovery_callback('startup_complete', on_startup_complete)
+    discovery_manager.add_discovery_callback('server_discovered', on_server_discovered)
+    
+    # Start legacy discovery for backward compatibility
+    start_server_discovery()
+    
+    # Add this server to the group views
     group_view_servers.add(server_id)
     server_last_seen[server_id] = time.time()
-    
-    # Add to unified group view
     group_view.add_participant(str(server_id), 'server', (server_IP, 0), socket.gethostname())
     
-    # Trigger election after server startup
-    time.sleep(2)  # Give time for discovery
-    trigger_election()
+    # Start enhanced discovery (this will handle timing and elections)
+    discovery_manager.start_discovery()
     
+    print("Server startup complete. Enhanced discovery is running...")
+    print("Discovery statistics:")
+    stats = discovery_manager.get_discovery_statistics()
+    for key, value in stats.items():
+        print(f"  {key}: {value}")
+    
+    # Wait a bit for initial discovery, then show system status
+    time.sleep(5)
     showSystemcomponents()

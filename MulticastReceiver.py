@@ -39,20 +39,26 @@ while True:
         msg = data.decode()
         print(f"Received message from {client_addr}: {msg}")
 
-        if msg == "join":
-            print(f"\nClient {client_addr} wants to join.")
+        if msg == "join" or msg.startswith("join:"):
+            # Handle both legacy "join" and enhanced "join:client_id" formats
+            if msg.startswith("join:"):
+                parts = msg.split(":")
+                client_id = parts[1] if len(parts) > 1 else f"{client_addr[0]}:{client_addr[1]}"
+            else:
+                client_id = f"{client_addr[0]}:{client_addr[1]}"
+                
+            print(f"\nClient {client_id} at {client_addr} wants to join.")
             
             # Add client to legacy view for backward compatibility
             group_view_clients.add(client_addr)
             client_last_seen[client_addr] = time.time()
             
             # Add client to unified group view
-            client_id = f"{client_addr[0]}:{client_addr[1]}"
             group_view.add_participant(client_id, 'client', client_addr)
             
             leader_id = get_current_leader()
             leader_name = socket.gethostname() if leader_id else "No leader elected"
-            response = f"\nCurrent Leader: {leader_name} (ID: {leader_id})"
+            response = f"\nWelcome {client_id}! Current Leader: {leader_name} (ID: {leader_id})"
         elif msg.startswith("SERVER_ALIVE:"):
             # Handle server announcements
             parts = msg.split(":")
@@ -75,14 +81,41 @@ while True:
                     trigger_election()
             continue  # Don't send response for server announcements
         elif msg.startswith("SERVER_PROBE:"):
-            # Respond to server probes
+            # Enhanced server probe handling
             parts = msg.split(":")
-            if len(parts) >= 2:
+            if len(parts) >= 3:
+                msg_type, probe_ip, probe_server_id = parts[0], parts[1], parts[2]
+                
+                # Don't respond to our own probes
+                my_server_id = hash(socket.gethostbyname(socket.gethostname()) + socket.gethostname()) % 10000
+                if probe_server_id != str(my_server_id):
+                    response = f"SERVER_RESPONSE:{socket.gethostname()}:{socket.gethostbyname(socket.gethostname())}"
+                    print(f"Responding to enhanced server probe from {probe_ip} (Server ID: {probe_server_id})")
+                else:
+                    print(f"Ignoring probe from self: {probe_server_id}")
+                    continue
+            elif len(parts) >= 2:
+                # Legacy probe format
                 probe_ip = parts[1]
                 response = f"SERVER_RESPONSE:{socket.gethostname()}:{socket.gethostbyname(socket.gethostname())}"
-                print(f"Responding to server probe from {probe_ip}")
+                print(f"Responding to legacy server probe from {probe_ip}")
             else:
                 continue
+        elif msg.startswith("SERVER_PROBE_CAPABLE:"):
+            # Handle server probe capability announcements
+            parts = msg.split(":")
+            if len(parts) >= 4:
+                msg_type, server_ip, hostname, server_id = parts[0], parts[1], parts[2], parts[3]
+                print(f"Server {hostname} (ID: {server_id}) announced probe capability")
+                
+                # Add to group views if not already present
+                server_id_int = int(server_id) if server_id.isdigit() else hash(server_ip + hostname) % 10000
+                group_view_servers.add(server_id_int)
+                server_last_seen[server_id_int] = time.time()
+                
+                # Add to unified group view
+                group_view.add_participant(str(server_id_int), 'server', (server_ip, 0), hostname)
+            continue  # Don't send response for capability announcements
         elif msg.startswith("CLIENT_HEARTBEAT:"):
             # Handle client heartbeat messages
             parts = msg.split(":")

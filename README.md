@@ -69,3 +69,31 @@ test 123
   - Status: Send "status" message to get real-time system overview
 
   The system now provides comprehensive visibility into all participants with automatic cleanup, health monitoring, and detailed statistics.
+
+
+   1. System Startup Discovery:
+  - Enhanced Discovery Manager (DiscoveryManager.py) with proper timing phases
+  - 15-second startup phase with 3 retry attempts and 2-second delays
+  - Discovery validation to ensure servers are responsive
+  - Delayed election trigger only after discovery completes
+
+  2. New Component Discovery:
+  - Automatic server detection when SERVER_ALIVE messages received
+  - Enhanced probe handling with server ID validation
+  - Client retry mechanism with 3 attempts and 5-second timeouts
+  - Joining discovery phase for servers entering existing systems
+
+  Key Improvements:
+  - Phased discovery: STARTUP → RUNNING → JOINING phases
+  - Retry mechanisms: Multiple attempts with exponential backoff
+  - Timing fixes: Proper delays before elections
+  - Enhanced messaging: Improved probe/response protocols
+  - Statistics tracking: Discovery attempt monitoring
+
+  Usage:
+  - Servers now use DiscoveryManager for robust startup discovery
+  - Clients use ClientDiscovery with retry capabilities
+  - Elections only trigger after discovery phases complete
+  - Both legacy and enhanced discovery work together
+
+  The system now properly handles discovery in both startup and dynamic joining scenarios.
