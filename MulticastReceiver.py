@@ -13,6 +13,7 @@ from resources.utils import server_last_seen
 from resources.utils import client_last_seen
 from LeaderElection import handle_election_message, get_current_leader, trigger_election
 from GroupView import get_group_view, start_group_view, print_system_status
+from FaultTolerance import get_fault_tolerance_manager
 
 # Creating a UDP socket instance 
 UDP_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -38,6 +39,22 @@ while True:
         data, client_addr = UDP_socket.recvfrom(BUFFER_SIZE)
         msg = data.decode()
         print(f"Received message from {client_addr}: {msg}")
+        
+        # Handle message with fault tolerance if available
+        ft_manager = get_fault_tolerance_manager()
+        if ft_manager:
+            processed_msg = ft_manager.handle_message(msg, client_addr)
+            if processed_msg:
+                if processed_msg.get('type') == 'reliable_message':
+                    # Handle reliable message
+                    reliable_msg = processed_msg['message']
+                    print(f"Processing reliable message: {reliable_msg.msg_type} from {reliable_msg.sender_id}")
+                    # Continue with normal processing
+                elif processed_msg.get('type') == 'heartbeat_ack':
+                    # Send heartbeat acknowledgment
+                    response = json.dumps(processed_msg)
+                    UDP_socket.sendto(response.encode(), client_addr)
+                    continue
 
         if msg == "join" or msg.startswith("join:"):
             # Handle both legacy "join" and enhanced "join:client_id" formats

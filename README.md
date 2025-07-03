@@ -97,3 +97,49 @@ test 123
   - Both legacy and enhanced discovery work together
 
   The system now properly handles discovery in both startup and dynamic joining scenarios.
+
+  Fault Tolerance Coverage:
+
+  ✅ Crash Faults:
+  - Leader heartbeat monitoring (10s timeout)
+  - Server failure detection (15s timeout)
+  - Client automatic reconnection with exponential backoff
+  - Automatic leader re-election on leader failure
+
+  ✅ Omission Faults:
+  - Message acknowledgment and retry system (3 attempts)
+  - Sequence numbers and duplicate detection
+  - Network partition detection and recovery
+  - Timeout handling with configurable retries
+
+  ✅ Byzantine Faults:
+  - Message integrity checking with SHA-256 checksums
+  - Basic message validation and format checks
+  - Malicious behavior detection and logging
+  - Message corruption detection
+
+  Recovery Strategies Implemented:
+
+  1. Message Reliability (FaultTolerance.py):
+    - Reliable messaging with ACK/retry
+    - Sequence numbers and duplicate detection
+    - Message integrity verification
+  2. Failure Detection (FaultTolerance.py:200-250):
+    - 5-second heartbeats with 15-second timeouts
+    - Leader heartbeat monitoring
+    - Automatic failure callbacks
+  3. Partition Tolerance (FaultTolerance.py:60-120):
+    - Network partition detection via node probing
+    - Majority-based partition decisions
+    - Automatic recovery when partition heals
+  4. Client Resilience (Client.py:126-149):
+    - Automatic reconnection with exponential backoff
+    - Connection failure detection
+    - Session recovery mechanisms
+  5. Comprehensive Logging (FaultTolerance.py:15-16):
+    - Structured logging with timestamps
+    - Fault statistics tracking
+    - Recovery event monitoring
+
+  The system now tolerates all three fault types with robust recovery strategies.
+

@@ -4,6 +4,7 @@ import time
 import uuid
 from resources.utils import MULTICAST_GROUP_ADDRESS
 from DiscoveryManager import ClientDiscovery
+from FaultTolerance import initialize_fault_tolerance, get_fault_tolerance_manager
 
 class ChatClient:
     """Enhanced chat client with heartbeat and group view support"""
@@ -15,6 +16,9 @@ class ChatClient:
         self.connected = False
         self.heartbeat_thread = None
         self.heartbeat_interval = 30  # seconds
+        self.ft_manager = None
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 5
         
     def connect(self):
         """Connect to the distributed chat system with enhanced discovery"""
@@ -35,6 +39,18 @@ class ChatClient:
             print(f"Server response: {response}")
             
             self.connected = True
+            self.reconnect_attempts = 0
+            
+            # Initialize fault tolerance for client
+            self.ft_manager = initialize_fault_tolerance(self.client_id, "client")
+            
+            # Add reconnection recovery callback
+            def on_connection_failure(failed_node_id):
+                print(f"Connection failure detected, attempting reconnection...")
+                self._attempt_reconnection()
+            
+            self.ft_manager.register_recovery_callback('crash', on_connection_failure)
+            self.ft_manager.start()
             
             # Start heartbeat thread
             self.start_heartbeat()
@@ -101,9 +117,36 @@ class ChatClient:
     def disconnect(self):
         """Disconnect from the chat system"""
         self.connected = False
+        if self.ft_manager:
+            self.ft_manager.stop()
         if self.socket:
             self.socket.close()
         print(f"Client {self.username} disconnected")
+    
+    def _attempt_reconnection(self):
+        """Attempt to reconnect to the system"""
+        if self.reconnect_attempts >= self.max_reconnect_attempts:
+            print(f"Max reconnection attempts ({self.max_reconnect_attempts}) reached")
+            return False
+        
+        self.reconnect_attempts += 1
+        print(f"Reconnection attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
+        
+        # Disconnect current connection
+        self.connected = False
+        if self.socket:
+            self.socket.close()
+        
+        # Wait before reconnecting
+        time.sleep(2 ** self.reconnect_attempts)  # Exponential backoff
+        
+        # Attempt to reconnect
+        if self.connect():
+            print("Reconnection successful!")
+            return True
+        else:
+            print(f"Reconnection attempt {self.reconnect_attempts} failed")
+            return False
     
     def interactive_mode(self):
         """Start interactive chat mode"""
