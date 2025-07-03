@@ -23,9 +23,16 @@ def getIP():
         s.close()
     return IP
 
-# Defining server attributes 
-server_IP= getIP()
-server_id = hash(server_IP + socket.gethostname()) % 10000  # Generate unique server ID 
+# Server Configuration and Initialization
+server_ip = getIP()  # Get this server's IP address
+hostname = socket.gethostname()  # Get this server's hostname
+
+# Import standardized utilities
+from resources.utils import (generate_server_id, SERVER_TIMEOUT, HEARTBEAT_INTERVAL, 
+                            CLEANUP_INTERVAL, SERVER_ANNOUNCE_INTERVAL, create_multicast_socket)
+
+# Generate consistent server ID using standardized function
+server_id = generate_server_id(server_ip, hostname) 
 
 
 
@@ -33,14 +40,25 @@ server_id = hash(server_IP + socket.gethostname()) % 10000  # Generate unique se
 
 
 def announce_server():
-    """Periodically announce this server's presence"""
-    announce_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    announce_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+    """
+    Continuously announce this server's presence to other nodes in the system.
+    This helps with dynamic discovery when new servers join the network.
+    """
+    # Create a multicast socket for sending announcements
+    announce_socket = create_multicast_socket()
     
     while True:
-        server_info = f"SERVER_ALIVE:{server_IP}:{socket.gethostname()}"
-        announce_socket.sendto(server_info.encode(), MULTICAST_GROUP_ADDRESS)
-        time.sleep(10)  # Announce every 10 seconds
+        try:
+            # Create standardized server announcement message
+            server_announcement = f"SERVER_ALIVE:{server_ip}:{hostname}"
+            announce_socket.sendto(server_announcement.encode(), MULTICAST_GROUP_ADDRESS)
+            
+            # Wait for the next announcement interval
+            time.sleep(SERVER_ANNOUNCE_INTERVAL)
+            
+        except Exception as e:
+            print(f"Error in server announcement: {e}")
+            time.sleep(SERVER_ANNOUNCE_INTERVAL)  # Continue despite errors
 
 def probe_servers():
     """Actively probe for other servers"""
