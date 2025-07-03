@@ -16,3 +16,7 @@ server_last_seen = {}  # Track when servers were last seen
 current_leader = None  # Current leader server ID
 leader_election_in_progress = False  # Election status flag
 my_server_id = None  # This server's ID
+
+# Client tracking structures
+client_last_seen = {}  # Track when clients were last seen
+CLIENT_TIMEOUT = 60  # Client timeout in seconds

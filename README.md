@@ -55,3 +55,17 @@ test 123
   - resources/utils.py - Added leader state management
 
   The implementation uses server IDs based on IP+hostname hash, handles ELECTION/OK/COORDINATOR messages via multicast, and maintains leader state globally.
+
+
+    1. Unified Group View API (GroupView.py) - Complete participant management with metadata, statistics, and event notifications
+  2. Client Health Monitoring - Added heartbeat system with CLIENT_HEARTBEAT messages and automatic cleanup
+  3. Enhanced Client Implementation (Client.py) - Complete chat client with heartbeat, status requests, and interactive mode
+  4. Standardized Data Structures - Consistent tracking with Participant objects containing ID, type, address, hostname, timestamps, and metadata
+  5. Event System - Callbacks for join/leave/timeout events with extensible notification framework
+
+  Usage:
+  - Servers: python Server.py - Shows unified group view with all participants
+  - Clients: python Client.py [username] - Interactive chat with heartbeat
+  - Status: Send "status" message to get real-time system overview
+
+  The system now provides comprehensive visibility into all participants with automatic cleanup, health monitoring, and detailed statistics.

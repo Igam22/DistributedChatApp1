@@ -6,6 +6,7 @@ from resources.utils import group_view_clients
 from resources.utils import server_last_seen
 from resources.utils import MULTICAST_GROUP_ADDRESS
 from LeaderElection import initialize_election, trigger_election, detect_leader_failure, get_current_leader
+from GroupView import get_group_view, start_group_view, print_system_status
 
 # Getting the IP address by trying to reach unreachable address, method from:https://stackoverflow.com/questions/166506/finding-local-ip-addresses-using-pythons-stdlib 
 def getIP():
@@ -95,8 +96,17 @@ def showSystemcomponents():
     print(f'Leading Server: {get_current_leader()}')
     print(f'Clients in System: {group_view_clients}')
     
+    # Also show unified group view
+    print("\n" + "="*30)
+    print("UNIFIED GROUP VIEW:")
+    print_system_status()
+    
 
 if __name__ == '__main__':
+    # Initialize unified group view
+    start_group_view()
+    group_view = get_group_view()
+    
     # Initialize election system
     initialize_election(server_id, server_IP)
     
@@ -106,6 +116,9 @@ if __name__ == '__main__':
     # Add this server to the group and trigger initial election
     group_view_servers.add(server_id)
     server_last_seen[server_id] = time.time()
+    
+    # Add to unified group view
+    group_view.add_participant(str(server_id), 'server', (server_IP, 0), socket.gethostname())
     
     # Trigger election after server startup
     time.sleep(2)  # Give time for discovery

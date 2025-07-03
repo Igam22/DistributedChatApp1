@@ -10,7 +10,9 @@ from resources.utils import BUFFER_SIZE
 from resources.utils import group_view_servers
 from resources.utils import group_view_clients
 from resources.utils import server_last_seen
+from resources.utils import client_last_seen
 from LeaderElection import handle_election_message, get_current_leader, trigger_election
+from GroupView import get_group_view, start_group_view, print_system_status
 
 # Creating a UDP socket instance 
 UDP_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -27,6 +29,10 @@ UDP_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
 print(f"\nListening for messages on: {MULTICAST_GROUP_ADDRESS}")
 
+# Start the unified group view
+start_group_view()
+group_view = get_group_view()
+
 while True:
     try:   
         data, client_addr = UDP_socket.recvfrom(BUFFER_SIZE)
@@ -36,12 +42,14 @@ while True:
         if msg == "join":
             print(f"\nClient {client_addr} wants to join.")
             
-            for other_addr in group_view_clients:
-                if other_addr != client_addr:
-                    info_msg = f"Another node in the network: {other_addr}"
-                    group_view_clients.add(client_addr)
-                    
-
+            # Add client to legacy view for backward compatibility
+            group_view_clients.add(client_addr)
+            client_last_seen[client_addr] = time.time()
+            
+            # Add client to unified group view
+            client_id = f"{client_addr[0]}:{client_addr[1]}"
+            group_view.add_participant(client_id, 'client', client_addr)
+            
             leader_id = get_current_leader()
             leader_name = socket.gethostname() if leader_id else "No leader elected"
             response = f"\nCurrent Leader: {leader_name} (ID: {leader_id})"
@@ -52,8 +60,14 @@ while True:
                 server_ip = parts[1]
                 server_name = parts[2]
                 server_id = hash(server_ip + server_name) % 10000  # Generate same ID as server
+                
+                # Add to legacy views for backward compatibility
                 group_view_servers.add(server_id)
                 server_last_seen[server_id] = time.time()
+                
+                # Add to unified group view
+                group_view.add_participant(str(server_id), 'server', (server_ip, 0), server_name)
+                
                 print(f"Discovered server: {server_name} at {server_ip} (ID: {server_id})")
                 
                 # Trigger election when new server joins
@@ -69,6 +83,21 @@ while True:
                 print(f"Responding to server probe from {probe_ip}")
             else:
                 continue
+        elif msg.startswith("CLIENT_HEARTBEAT:"):
+            # Handle client heartbeat messages
+            parts = msg.split(":")
+            if len(parts) >= 2:
+                client_id = parts[1]
+                # Update client activity in both legacy and unified views
+                client_last_seen[client_addr] = time.time()
+                group_view.update_participant_activity(client_id)
+                print(f"Received heartbeat from client {client_id}")
+            continue  # Don't send response for heartbeat messages
+        elif msg == "status":
+            # Handle system status requests
+            print_system_status()
+            status = group_view.get_system_status()
+            response = f"\nSystem Status - Servers: {status['participant_counts']['active_servers']}, Clients: {status['participant_counts']['active_clients']}"
         else:
             # Try to parse as JSON election message
             try:
