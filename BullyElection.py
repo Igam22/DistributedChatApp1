@@ -14,13 +14,13 @@ def process_Pool(id,message_case=0):
         if id==len(group_view_servers): # last node in the list
              return None # theres no higher priority node
 
-        return new_list # return list of higher priority nodes
+        return highest_node # return list of higher priority nodes
     if message_case==2 and id is not 1:#sending an ok mesage within the time limit
-        return [nodes_list[int(id)-2] ]# return id of predecessor node in priority hierachy
+        servers_list = sorted(list(group_view_servers))
+        return [servers_list[int(id)-2] ]# return id of predecessor node in priority hierachy
     if message_case==3: #sending an Ive won message to other nodes
-        del nodes_list[len(nodes_list)-1] # pop the highest id and form a list of recepients which is
-        #everyone else
-        return nodes_list # updated list with recepients being everyone minus the winner
+        servers_list = sorted(list(group_view_servers))
+        return [x for x in servers_list if x != id] # return all nodes except the winner
 
 
 #simulate communication of nodes

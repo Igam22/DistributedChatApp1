@@ -11,3 +11,8 @@ group_view_servers = set()
 
 # Server tracking structures
 server_last_seen = {}  # Track when servers were last seen
+
+# Leader election state
+current_leader = None  # Current leader server ID
+leader_election_in_progress = False  # Election status flag
+my_server_id = None  # This server's ID

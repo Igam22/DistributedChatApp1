@@ -43,3 +43,15 @@ test 123
   - Run python Server.py to start server discovery
   - Run python MulticastReceiver.py to listen for messages
   - Servers will automatically discover each other and maintain an active list
+
+
+    1. Server startup: Server.py:111 - triggers election after initialization2. New server joins: MulticastReceiver.py:60 - triggers election when SERVER_ALIVE received3. Leader fails: Server.py:77 -
+  detects failure in cleanup and triggers election
+
+  Key files created/modified:
+  - LeaderElection.py - Complete bully algorithm implementation with network communication
+  - Server.py - Added election initialization and failure detection
+  - MulticastReceiver.py - Added election message handling
+  - resources/utils.py - Added leader state management
+
+  The implementation uses server IDs based on IP+hostname hash, handles ELECTION/OK/COORDINATOR messages via multicast, and maintains leader state globally.

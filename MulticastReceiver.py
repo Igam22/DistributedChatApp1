@@ -1,6 +1,7 @@
 import socket
 import struct
 import time
+import json
 
 from resources.utils import MULTICAST_GROUP_ADDRESS
 from resources.utils import MULTICAST_IP
@@ -9,6 +10,7 @@ from resources.utils import BUFFER_SIZE
 from resources.utils import group_view_servers
 from resources.utils import group_view_clients
 from resources.utils import server_last_seen
+from LeaderElection import handle_election_message, get_current_leader, trigger_election
 
 # Creating a UDP socket instance 
 UDP_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -40,17 +42,23 @@ while True:
                     group_view_clients.add(client_addr)
                     
 
-            response = f"\nI am the current Leader: {socket.gethostname()}"
+            leader_id = get_current_leader()
+            leader_name = socket.gethostname() if leader_id else "No leader elected"
+            response = f"\nCurrent Leader: {leader_name} (ID: {leader_id})"
         elif msg.startswith("SERVER_ALIVE:"):
             # Handle server announcements
             parts = msg.split(":")
             if len(parts) >= 3:
                 server_ip = parts[1]
                 server_name = parts[2]
-                server_info = (server_ip, server_name)
-                group_view_servers.add(server_info)
-                server_last_seen[server_info] = time.time()
-                print(f"Discovered server: {server_name} at {server_ip}")
+                server_id = hash(server_ip + server_name) % 10000  # Generate same ID as server
+                group_view_servers.add(server_id)
+                server_last_seen[server_id] = time.time()
+                print(f"Discovered server: {server_name} at {server_ip} (ID: {server_id})")
+                
+                # Trigger election when new server joins
+                if len(group_view_servers) > 1:
+                    trigger_election()
             continue  # Don't send response for server announcements
         elif msg.startswith("SERVER_PROBE:"):
             # Respond to server probes
@@ -62,6 +70,15 @@ while True:
             else:
                 continue
         else:
+            # Try to parse as JSON election message
+            try:
+                election_msg = json.loads(msg)
+                if election_msg.get("type") in ["ELECTION", "OK", "COORDINATOR"]:
+                    handle_election_message(election_msg)
+                    continue  # Don't send response for election messages
+            except json.JSONDecodeError:
+                pass
+            
             response = f"\nYour message was received by {socket.gethostname()}!"
 
         UDP_socket.sendto(response.encode(), client_addr)

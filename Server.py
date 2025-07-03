@@ -5,6 +5,7 @@ from resources.utils import group_view_servers
 from resources.utils import group_view_clients
 from resources.utils import server_last_seen
 from resources.utils import MULTICAST_GROUP_ADDRESS
+from LeaderElection import initialize_election, trigger_election, detect_leader_failure, get_current_leader
 
 # Getting the IP address by trying to reach unreachable address, method from:https://stackoverflow.com/questions/166506/finding-local-ip-addresses-using-pythons-stdlib 
 def getIP():
@@ -21,7 +22,7 @@ def getIP():
 
 # Defining server attributes 
 server_IP= getIP()
-current_leader = None 
+server_id = hash(server_IP + socket.gethostname()) % 10000  # Generate unique server ID 
 
 
 
@@ -71,6 +72,9 @@ def cleanup_dead_servers():
         group_view_servers.discard(server)
         server_last_seen.pop(server, None)
         print(f"Removed dead server: {server}")
+        
+        # Check if leader failed and trigger election
+        detect_leader_failure()
 
 def start_server_discovery():
     """Start server discovery thread"""
@@ -88,11 +92,23 @@ def start_server_discovery():
 
 def showSystemcomponents():
     print(f'Servers in System: {group_view_servers}')
-    #print(f'Leading Server: {TODO!!!!!}')
+    print(f'Leading Server: {get_current_leader()}')
     print(f'Clients in System: {group_view_clients}')
     
 
 if __name__ == '__main__':
+    # Initialize election system
+    initialize_election(server_id, server_IP)
+    
     start_server_discovery()
     probe_servers()
+    
+    # Add this server to the group and trigger initial election
+    group_view_servers.add(server_id)
+    server_last_seen[server_id] = time.time()
+    
+    # Trigger election after server startup
+    time.sleep(2)  # Give time for discovery
+    trigger_election()
+    
     showSystemcomponents()
