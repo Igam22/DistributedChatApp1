@@ -1,5 +1,6 @@
 import socket
 import struct
+import time
 
 from resources.utils import MULTICAST_GROUP_ADDRESS
 from resources.utils import MULTICAST_IP
@@ -7,6 +8,7 @@ from resources.utils import MULTICAST_PORT
 from resources.utils import BUFFER_SIZE
 from resources.utils import group_view_servers
 from resources.utils import group_view_clients
+from resources.utils import server_last_seen
 
 # Creating a UDP socket instance 
 UDP_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -39,6 +41,26 @@ while True:
                     
 
             response = f"\nI am the current Leader: {socket.gethostname()}"
+        elif msg.startswith("SERVER_ALIVE:"):
+            # Handle server announcements
+            parts = msg.split(":")
+            if len(parts) >= 3:
+                server_ip = parts[1]
+                server_name = parts[2]
+                server_info = (server_ip, server_name)
+                group_view_servers.add(server_info)
+                server_last_seen[server_info] = time.time()
+                print(f"Discovered server: {server_name} at {server_ip}")
+            continue  # Don't send response for server announcements
+        elif msg.startswith("SERVER_PROBE:"):
+            # Respond to server probes
+            parts = msg.split(":")
+            if len(parts) >= 2:
+                probe_ip = parts[1]
+                response = f"SERVER_RESPONSE:{socket.gethostname()}:{socket.gethostbyname(socket.gethostname())}"
+                print(f"Responding to server probe from {probe_ip}")
+            else:
+                continue
         else:
             response = f"\nYour message was received by {socket.gethostname()}!"
 

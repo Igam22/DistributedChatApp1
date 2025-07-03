@@ -7,4 +7,7 @@ BUFFER_SIZE = 10240
 
 #Defining a view where we can see all the participants in the system
 group_view_clients = set() 
-group_view_servers= set()
+group_view_servers = set()
+
+# Server tracking structures
+server_last_seen = {}  # Track when servers were last seen
