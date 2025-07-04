@@ -14,6 +14,7 @@ from resources.utils import client_last_seen
 from LeaderElection import handle_election_message, get_current_leader, trigger_election
 from GroupView import get_group_view, start_group_view, print_system_status
 from FaultTolerance import get_fault_tolerance_manager
+from resources.utils import generate_server_id
 
 # Creating a UDP socket instance 
 UDP_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -82,20 +83,29 @@ while True:
             if len(parts) >= 3:
                 server_ip = parts[1]
                 server_name = parts[2]
-                server_id = hash(server_ip + server_name) % 10000  # Generate same ID as server
+                server_id = generate_server_id(server_ip, server_name)  # Use standardized ID generation
                 
-                # Add to legacy views for backward compatibility
-                group_view_servers.add(server_id)
-                server_last_seen[server_id] = time.time()
+                # Get our own server ID for comparison
+                my_ip = socket.gethostbyname(socket.gethostname())
+                my_hostname = socket.gethostname()
+                my_server_id = generate_server_id(my_ip, my_hostname)
                 
-                # Add to unified group view
-                group_view.add_participant(str(server_id), 'server', (server_ip, 0), server_name)
-                
-                print(f"Discovered server: {server_name} at {server_ip} (ID: {server_id})")
-                
-                # Trigger election when new server joins
-                if len(group_view_servers) > 1:
-                    trigger_election()
+                # Don't process our own announcements
+                if server_id != my_server_id:
+                    # Add to legacy views for backward compatibility
+                    group_view_servers.add(server_id)
+                    server_last_seen[server_id] = time.time()
+                    
+                    # Add to unified group view
+                    group_view.add_participant(str(server_id), 'server', (server_ip, 0), server_name)
+                    
+                    print(f"Discovered server: {server_name} at {server_ip} (ID: {server_id})")
+                    
+                    # Trigger election when new server joins
+                    if len(group_view_servers) > 1:
+                        trigger_election()
+                else:
+                    print(f"Ignoring own announcement from {server_name} (ID: {server_id})")
             continue  # Don't send response for server announcements
         elif msg.startswith("SERVER_PROBE:"):
             # Enhanced server probe handling
@@ -104,7 +114,7 @@ while True:
                 msg_type, probe_ip, probe_server_id = parts[0], parts[1], parts[2]
                 
                 # Don't respond to our own probes
-                my_server_id = hash(socket.gethostbyname(socket.gethostname()) + socket.gethostname()) % 10000
+                my_server_id = generate_server_id(socket.gethostbyname(socket.gethostname()), socket.gethostname())
                 if probe_server_id != str(my_server_id):
                     response = f"SERVER_RESPONSE:{socket.gethostname()}:{socket.gethostbyname(socket.gethostname())}"
                     print(f"Responding to enhanced server probe from {probe_ip} (Server ID: {probe_server_id})")
@@ -126,7 +136,7 @@ while True:
                 print(f"Server {hostname} (ID: {server_id}) announced probe capability")
                 
                 # Add to group views if not already present
-                server_id_int = int(server_id) if server_id.isdigit() else hash(server_ip + hostname) % 10000
+                server_id_int = int(server_id) if server_id.isdigit() else generate_server_id(server_ip, hostname)
                 group_view_servers.add(server_id_int)
                 server_last_seen[server_id_int] = time.time()
                 

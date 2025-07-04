@@ -3,7 +3,7 @@ import threading
 import time
 import json
 from typing import Set, Dict, Optional, Callable
-from resources.utils import MULTICAST_GROUP_ADDRESS, group_view_servers, server_last_seen
+from resources.utils import MULTICAST_GROUP_ADDRESS, group_view_servers, server_last_seen, generate_server_id
 from LeaderElection import trigger_election
 
 class DiscoveryPhase:
@@ -188,7 +188,7 @@ class DiscoveryManager:
             parts = response.split(":")
             if len(parts) >= 3:
                 response_type, hostname, server_ip = parts[0], parts[1], parts[2]
-                server_id = hash(server_ip + hostname) % 10000
+                server_id = generate_server_id(server_ip, hostname)
                 
                 if str(server_id) != str(self.server_id):  # Don't discover self
                     self.discovered_servers.add(str(server_id))
@@ -209,7 +209,7 @@ class DiscoveryManager:
             parts = message.split(":")
             if len(parts) >= 3:
                 msg_type, server_ip, hostname = parts[0], parts[1], parts[2]
-                server_id = hash(server_ip + hostname) % 10000
+                server_id = generate_server_id(server_ip, hostname)
                 
                 if str(server_id) != str(self.server_id):  # Don't discover self
                     self.discovered_servers.add(str(server_id))

@@ -93,23 +93,30 @@ class PartitionDetector:
         """Probe all known nodes to detect partitions"""
         self.reachable_nodes.clear()
         
+        # If we don't know about any other nodes yet, we're not in a partition
+        total_nodes = len(self.known_nodes)
+        if total_nodes == 0:
+            self.in_partition = False
+            return True  # Single node is always connected
+        
+        # Probe all known nodes
         for node_id in self.known_nodes:
             if self._probe_node(node_id):
                 self.reachable_nodes.add(node_id)
                 self.probe_responses[node_id] = time.time()
         
-        # Check if we're in a partition
-        total_nodes = len(self.known_nodes)
+        # Check if we're in a partition (need majority of known nodes)
         reachable_nodes = len(self.reachable_nodes)
+        partition_threshold = total_nodes * 0.5  # Majority
         
-        if total_nodes > 0:
-            partition_threshold = total_nodes * 0.5  # Majority
-            was_in_partition = self.in_partition
-            self.in_partition = reachable_nodes < partition_threshold
-            
+        was_in_partition = self.in_partition
+        self.in_partition = reachable_nodes < partition_threshold
+        
+        # Only log partition events if we actually have other nodes to connect to
+        if total_nodes > 1:  # Only check partitions when we have multiple nodes
             if self.in_partition and not was_in_partition:
                 self.partition_start_time = time.time()
-                logger.warning(f"Partition detected! Reachable: {reachable_nodes}/{total_nodes}")
+                logger.warning(f"Network partition detected! Reachable: {reachable_nodes}/{total_nodes}")
             elif not self.in_partition and was_in_partition:
                 logger.info(f"Partition healed! Reachable: {reachable_nodes}/{total_nodes}")
                 self.partition_start_time = None

@@ -61,38 +61,64 @@ def announce_server():
             time.sleep(SERVER_ANNOUNCE_INTERVAL)  # Continue despite errors
 
 def probe_servers():
-    """Actively probe for other servers"""
+    """
+    Actively probe for other servers in the network.
+    This is a legacy function that works alongside the enhanced DiscoveryManager.
+    """
     probe_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     probe_socket.settimeout(2)
     
-    probe_msg = f"SERVER_PROBE:{server_IP}"
+    # Send probe message with our server details
+    probe_msg = f"SERVER_PROBE:{server_ip}:{server_id}"
     probe_socket.sendto(probe_msg.encode(), MULTICAST_GROUP_ADDRESS)
     
     # Listen for responses
     try:
         while True:
             data, addr = probe_socket.recvfrom(1024)
-            if data.decode().startswith("SERVER_RESPONSE:"):
-                group_view_servers.add(addr)
-                server_last_seen[addr] = time.time()
+            response = data.decode()
+            if response.startswith("SERVER_RESPONSE:"):
+                # Parse the response to get server details
+                parts = response.split(":")
+                if len(parts) >= 3:
+                    response_hostname = parts[1]
+                    response_ip = parts[2]
+                    response_server_id = generate_server_id(response_ip, response_hostname)
+                    
+                    # Don't add ourselves
+                    if response_server_id != server_id:
+                        group_view_servers.add(response_server_id)
+                        server_last_seen[response_server_id] = time.time()
+                        print(f"Probe discovered server: {response_hostname} (ID: {response_server_id})")
     except socket.timeout:
-        pass
+        pass  # Normal timeout, no more responses
+    except Exception as e:
+        print(f"Error during server probing: {e}")
     finally:
         probe_socket.close()
 
 def cleanup_dead_servers():
-    """Remove servers that haven't been seen recently"""
+    """
+    Remove servers that haven't been seen recently.
+    This function ensures we don't remove ourselves from the group view.
+    """
     current_time = time.time()
     dead_servers = []
     
-    for server in list(group_view_servers):
-        if current_time - server_last_seen.get(server, 0) > 30:  # 30 second timeout
-            dead_servers.append(server)
+    for server_check_id in list(group_view_servers):
+        # Never remove ourselves from the group view
+        if server_check_id == server_id:
+            continue
+            
+        # Check if other servers have timed out
+        if current_time - server_last_seen.get(server_check_id, 0) > SERVER_TIMEOUT:
+            dead_servers.append(server_check_id)
     
-    for server in dead_servers:
-        group_view_servers.discard(server)
-        server_last_seen.pop(server, None)
-        print(f"Removed dead server: {server}")
+    # Remove dead servers
+    for dead_server_id in dead_servers:
+        group_view_servers.discard(dead_server_id)
+        server_last_seen.pop(dead_server_id, None)
+        print(f"Removed dead server: {dead_server_id}")
         
         # Check if leader failed and trigger election
         detect_leader_failure()
@@ -142,22 +168,27 @@ if __name__ == '__main__':
         group_view.remove_participant(str(failed_node_id))
     
     def on_partition_recovery(partition_detector):
-        print(f"Network partition detected. Reachable nodes: {len(partition_detector.reachable_nodes)}")
-        if partition_detector.in_partition:
-            # Enter partition mode - stop leader election until healed
-            print("Entering partition mode - pausing leader election")
-        else:
-            print("Partition healed - resuming normal operation")
-            trigger_election()
+        total_known_nodes = len(partition_detector.known_nodes)
+        reachable_nodes = len(partition_detector.reachable_nodes)
+        
+        # Only process partition events if we have multiple nodes in the system
+        if total_known_nodes > 1:
+            if partition_detector.in_partition:
+                print(f"⚠️  Network partition detected! Reachable: {reachable_nodes}/{total_known_nodes}")
+                print("   Entering partition mode - pausing leader election until healed")
+            else:
+                print(f"✅ Network partition healed! Reachable: {reachable_nodes}/{total_known_nodes}")
+                print("   Resuming normal operation and triggering leader election")
+                trigger_election()
     
     ft_manager.register_recovery_callback('crash', on_crash_recovery)
     ft_manager.register_recovery_callback('partition', on_partition_recovery)
     
     # Initialize election system
-    initialize_election(server_id, server_IP)
+    initialize_election(server_id, server_ip)
     
     # Initialize enhanced discovery manager
-    discovery_manager = DiscoveryManager(str(server_id), server_IP, socket.gethostname())
+    discovery_manager = DiscoveryManager(str(server_id), server_ip, socket.gethostname())
     
     # Add discovery callbacks
     def on_startup_complete():
@@ -178,7 +209,7 @@ if __name__ == '__main__':
     # Add this server to the group views
     group_view_servers.add(server_id)
     server_last_seen[server_id] = time.time()
-    group_view.add_participant(str(server_id), 'server', (server_IP, 0), socket.gethostname())
+    group_view.add_participant(str(server_id), 'server', (server_ip, 0), socket.gethostname())
     
     # Start fault tolerance
     ft_manager.start()
