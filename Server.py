@@ -65,7 +65,7 @@ def probe_servers():
     probe_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     probe_socket.settimeout(2)
     
-    probe_msg = f"SERVER_PROBE:{server_IP}"
+    probe_msg = f"SERVER_PROBE:{server_ip}"
     probe_socket.sendto(probe_msg.encode(), MULTICAST_GROUP_ADDRESS)
     
     # Listen for responses
@@ -154,10 +154,10 @@ if __name__ == '__main__':
     ft_manager.register_recovery_callback('partition', on_partition_recovery)
     
     # Initialize election system
-    initialize_election(server_id, server_IP)
+    initialize_election(server_id, server_ip)
     
     # Initialize enhanced discovery manager
-    discovery_manager = DiscoveryManager(str(server_id), server_IP, socket.gethostname())
+    discovery_manager = DiscoveryManager(str(server_id), server_ip, socket.gethostname())
     
     # Add discovery callbacks
     def on_startup_complete():
@@ -178,7 +178,7 @@ if __name__ == '__main__':
     # Add this server to the group views
     group_view_servers.add(server_id)
     server_last_seen[server_id] = time.time()
-    group_view.add_participant(str(server_id), 'server', (server_IP, 0), socket.gethostname())
+    group_view.add_participant(str(server_id), 'server', (server_ip, 0), socket.gethostname())
     
     # Start fault tolerance
     ft_manager.start()
