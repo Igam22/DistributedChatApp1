@@ -3,7 +3,7 @@ import threading
 import time
 import json
 from typing import Set, Dict, Optional, Callable
-from resources.utils import MULTICAST_GROUP_ADDRESS, group_view_servers, server_last_seen, generate_server_id
+from resources.utils import MULTICAST_GROUP_ADDRESS, group_view_servers, server_last_seen, generate_server_id, safe_print
 from LeaderElection import trigger_election
 
 class DiscoveryPhase:
@@ -48,7 +48,7 @@ class DiscoveryManager:
             return
             
         self.running = True
-        print(f"Starting discovery for server {self.server_id}")
+        safe_print(f"Starting discovery for server {self.server_id}")
         
         # Start announcement thread immediately
         self.announcement_thread = threading.Thread(target=self._announcement_loop, daemon=True)
@@ -84,41 +84,41 @@ class DiscoveryManager:
     
     def _startup_discovery(self):
         """Comprehensive startup discovery with retries"""
-        print(f"Server {self.server_id}: Starting startup discovery phase")
+        safe_print(f"Server {self.server_id}: Starting startup discovery phase")
         
         # Perform multiple discovery rounds
         for attempt in range(self.max_retries):
             self.discovery_attempts += 1
-            print(f"Discovery attempt {attempt + 1}/{self.max_retries}")
+            safe_print(f"Discovery attempt {attempt + 1}/{self.max_retries}")
             
             discovered_count = self._perform_discovery_round()
             
             if discovered_count > 0:
                 self.successful_discoveries += 1
-                print(f"Discovered {discovered_count} servers in attempt {attempt + 1}")
+                safe_print(f"Discovered {discovered_count} servers in attempt {attempt + 1}")
             else:
                 self.failed_discoveries += 1
-                print(f"No servers discovered in attempt {attempt + 1}")
+                safe_print(f"No servers discovered in attempt {attempt + 1}")
             
             if attempt < self.max_retries - 1:
                 time.sleep(self.retry_delay)
         
         # Wait additional time for late responses
-        print(f"Waiting {self.startup_discovery_timeout - (self.max_retries * self.retry_delay)} seconds for additional responses...")
+        safe_print(f"Waiting {self.startup_discovery_timeout - (self.max_retries * self.retry_delay)} seconds for additional responses...")
         time.sleep(max(0, self.startup_discovery_timeout - (self.max_retries * self.retry_delay)))
         
         # Discovery complete
         self.discovery_complete = True
         self.discovery_phase = DiscoveryPhase.RUNNING
         
-        print(f"Startup discovery complete. Found {len(self.discovered_servers)} servers: {self.discovered_servers}")
+        safe_print(f"Startup discovery complete. Found {len(self.discovered_servers)} servers: {self.discovered_servers}")
         
         # Trigger election after discovery is complete
         self._trigger_callback('startup_complete')
         
         # Wait a bit more before triggering election to ensure all servers are ready
         time.sleep(3)
-        print(f"Triggering election after startup discovery")
+        safe_print(f"Triggering election after startup discovery")
         trigger_election()
     
     def _maintenance_discovery(self):
@@ -129,7 +129,7 @@ class DiscoveryManager:
     
     def _joining_discovery(self):
         """Discovery when joining an existing system"""
-        print(f"Server {self.server_id}: Performing joining discovery")
+        safe_print(f"Server {self.server_id}: Performing joining discovery")
         
         for attempt in range(self.max_retries):
             discovered_count = self._perform_discovery_round()
@@ -171,13 +171,13 @@ class DiscoveryManager:
                 except socket.timeout:
                     break
                 except Exception as e:
-                    print(f"Error receiving discovery response: {e}")
+                    safe_print(f"Error receiving discovery response: {e}")
                     break
             
             probe_socket.close()
             
         except Exception as e:
-            print(f"Error in discovery round: {e}")
+            safe_print(f"Error in discovery round: {e}")
             return 0
         
         return len(self.discovered_servers) - initial_count
@@ -197,11 +197,11 @@ class DiscoveryManager:
                     group_view_servers.add(server_id)
                     server_last_seen[server_id] = time.time()
                     
-                    print(f"Discovered server via response: {hostname} (ID: {server_id})")
+                    safe_print(f"Discovered server via response: {hostname} (ID: {server_id})")
                     self._trigger_callback('server_discovered', server_id)
                     
         except Exception as e:
-            print(f"Error processing server response: {e}")
+            safe_print(f"Error processing server response: {e}")
     
     def _process_server_alive(self, message: str):
         """Process SERVER_ALIVE message"""
@@ -218,11 +218,11 @@ class DiscoveryManager:
                     group_view_servers.add(server_id)
                     server_last_seen[server_id] = time.time()
                     
-                    print(f"Discovered server via alive: {hostname} (ID: {server_id})")
+                    safe_print(f"Discovered server via alive: {hostname} (ID: {server_id})")
                     self._trigger_callback('server_discovered', server_id)
                     
         except Exception as e:
-            print(f"Error processing server alive: {e}")
+            safe_print(f"Error processing server alive: {e}")
     
     def _announcement_loop(self):
         """Continuous server announcement loop"""
@@ -242,7 +242,7 @@ class DiscoveryManager:
                 time.sleep(10)  # Announce every 10 seconds
                 
             except Exception as e:
-                print(f"Error in announcement loop: {e}")
+                safe_print(f"Error in announcement loop: {e}")
                 time.sleep(10)
         
         announce_socket.close()
@@ -253,7 +253,7 @@ class DiscoveryManager:
             try:
                 self.discovery_callbacks[event_type](*args)
             except Exception as e:
-                print(f"Error in discovery callback {event_type}: {e}")
+                safe_print(f"Error in discovery callback {event_type}: {e}")
     
     def get_discovery_statistics(self) -> Dict:
         """Get discovery statistics"""
@@ -270,13 +270,13 @@ class DiscoveryManager:
     def force_discovery_phase(self, phase: str):
         """Force discovery to a specific phase (for testing)"""
         self.discovery_phase = phase
-        print(f"Discovery phase forced to: {phase}")
+        safe_print(f"Discovery phase forced to: {phase}")
     
     def trigger_joining_discovery(self):
         """Trigger discovery when joining an existing system"""
         if self.discovery_phase == DiscoveryPhase.RUNNING:
             self.discovery_phase = DiscoveryPhase.JOINING
-            print("Triggered joining discovery phase")
+            safe_print("Triggered joining discovery phase")
 
 # Enhanced client discovery with retry mechanism
 class ClientDiscovery:
@@ -292,7 +292,7 @@ class ClientDiscovery:
         """Discover servers with retry mechanism"""
         for attempt in range(self.max_retries):
             self.discovery_attempts += 1
-            print(f"Client {self.client_id}: Discovery attempt {attempt + 1}/{self.max_retries}")
+            safe_print(f"Client {self.client_id}: Discovery attempt {attempt + 1}/{self.max_retries}")
             
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -306,18 +306,18 @@ class ClientDiscovery:
                 response, server_addr = sock.recvfrom(1024)
                 sock.close()
                 
-                print(f"Client {self.client_id}: Connected to server at {server_addr}")
+                safe_print(f"Client {self.client_id}: Connected to server at {server_addr}")
                 return response.decode()
                 
             except socket.timeout:
-                print(f"Client {self.client_id}: Discovery attempt {attempt + 1} timed out")
+                safe_print(f"Client {self.client_id}: Discovery attempt {attempt + 1} timed out")
                 if attempt < self.max_retries - 1:
                     time.sleep(2)  # Wait before retry
                     
             except Exception as e:
-                print(f"Client {self.client_id}: Discovery attempt {attempt + 1} failed: {e}")
+                safe_print(f"Client {self.client_id}: Discovery attempt {attempt + 1} failed: {e}")
                 if attempt < self.max_retries - 1:
                     time.sleep(2)  # Wait before retry
         
-        print(f"Client {self.client_id}: Failed to discover servers after {self.max_retries} attempts")
+        safe_print(f"Client {self.client_id}: Failed to discover servers after {self.max_retries} attempts")
         return None

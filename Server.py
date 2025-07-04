@@ -4,6 +4,7 @@ import time
 import sys
 import struct
 import json
+
 from resources.utils import group_view_servers
 from resources.utils import group_view_clients
 from resources.utils import server_last_seen
@@ -12,6 +13,7 @@ from resources.utils import MULTICAST_GROUP_ADDRESS
 from resources.utils import MULTICAST_IP
 from resources.utils import MULTICAST_PORT
 from resources.utils import BUFFER_SIZE
+from resources.utils import safe_print
 from LeaderElection import initialize_election, trigger_election, detect_leader_failure, get_current_leader, handle_election_message
 from GroupView import get_group_view, start_group_view, print_system_status
 from DiscoveryManager import DiscoveryManager
@@ -64,7 +66,7 @@ def announce_server():
             time.sleep(SERVER_ANNOUNCE_INTERVAL)
             
         except Exception as e:
-            print(f"Error in server announcement: {e}")
+            safe_print(f"Error in server announcement: {e}")
             time.sleep(SERVER_ANNOUNCE_INTERVAL)  # Continue despite errors
 
 def probe_servers():
@@ -96,11 +98,11 @@ def probe_servers():
                     if response_server_id != server_id:
                         group_view_servers.add(response_server_id)
                         server_last_seen[response_server_id] = time.time()
-                        print(f"Probe discovered server: {response_hostname} (ID: {response_server_id})")
+                        safe_print(f"Probe discovered server: {response_hostname} (ID: {response_server_id})")
     except socket.timeout:
         pass  # Normal timeout, no more responses
     except Exception as e:
-        print(f"Error during server probing: {e}")
+        safe_print(f"Error during server probing: {e}")
     finally:
         probe_socket.close()
 
@@ -125,7 +127,7 @@ def cleanup_dead_servers():
     for dead_server_id in dead_servers:
         group_view_servers.discard(dead_server_id)
         server_last_seen.pop(dead_server_id, None)
-        print(f"Removed dead server: {dead_server_id}")
+        safe_print(f"Removed dead server: {dead_server_id}")
         
         # Check if leader failed and trigger election
         detect_leader_failure()
@@ -159,13 +161,13 @@ def multicast_receiver():
         mreq = struct.pack("4sl", socket.inet_aton(MULTICAST_IP), socket.INADDR_ANY)
         UDP_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
         
-        print(f"Multicast receiver listening on: {MULTICAST_GROUP_ADDRESS}")
+        safe_print(f"Multicast receiver listening on: {MULTICAST_GROUP_ADDRESS}")
         
         while True:
             try:
                 data, client_addr = UDP_socket.recvfrom(BUFFER_SIZE)
                 msg = data.decode()
-                print(f"Received message from {client_addr}: {msg}")
+                safe_print(f"Received message from {client_addr}: {msg}")
                 
                 # Handle message with fault tolerance if available
                 ft_manager = get_fault_tolerance_manager()
@@ -188,7 +190,7 @@ def multicast_receiver():
                     else:
                         client_id = f"{client_addr[0]}:{client_addr[1]}"
                     
-                    print(f"\nClient {client_id} at {client_addr} wants to join.")
+                    safe_print(f"\nClient {client_id} at {client_addr} wants to join.")
                     
                     # Add client to legacy view for backward compatibility
                     group_view_clients.add(client_addr)
@@ -220,13 +222,13 @@ def multicast_receiver():
                             group_view = get_group_view()
                             group_view.add_participant(str(discovered_server_id), 'server', (server_ip, 0), server_name)
                             
-                            print(f"Discovered server: {server_name} at {server_ip} (ID: {discovered_server_id})")
+                            safe_print(f"Discovered server: {server_name} at {server_ip} (ID: {discovered_server_id})")
                             
                             # Trigger election when new server joins
                             if len(group_view_servers) > 1:
                                 trigger_election()
                         else:
-                            print(f"Ignoring own announcement from {server_name} (ID: {discovered_server_id})")
+                            safe_print(f"Ignoring own announcement from {server_name} (ID: {discovered_server_id})")
                     continue  # Don't send response for server announcements
                 
                 # Handle server probes
@@ -236,14 +238,14 @@ def multicast_receiver():
                         probe_server_id = parts[2]
                         if probe_server_id != str(server_id):
                             response = f"SERVER_RESPONSE:{hostname}:{server_ip}"
-                            print(f"Responding to server probe from {parts[1]} (Server ID: {probe_server_id})")
+                            safe_print(f"Responding to server probe from {parts[1]} (Server ID: {probe_server_id})")
                         else:
-                            print(f"Ignoring probe from self: {probe_server_id}")
+                            safe_print(f"Ignoring probe from self: {probe_server_id}")
                             continue
                     elif len(parts) >= 2:
                         # Legacy probe format
                         response = f"SERVER_RESPONSE:{hostname}:{server_ip}"
-                        print(f"Responding to legacy server probe from {parts[1]}")
+                        safe_print(f"Responding to legacy server probe from {parts[1]}")
                     else:
                         continue
                 
@@ -256,7 +258,7 @@ def multicast_receiver():
                         client_last_seen[client_addr] = time.time()
                         group_view = get_group_view()
                         group_view.update_participant_activity(client_id)
-                        print(f"Received heartbeat from client {client_id}")
+                        safe_print(f"Received heartbeat from client {client_id}")
                     continue  # Don't send response for heartbeat messages
                 
                 # Handle system status requests
@@ -283,23 +285,23 @@ def multicast_receiver():
                     UDP_socket.sendto(response.encode(), client_addr)
                     
             except Exception as e:
-                print(f"Error in multicast receiver: {e}")
+                safe_print(f"Error in multicast receiver: {e}")
                 continue
                 
     except Exception as e:
-        print(f"Failed to initialize multicast receiver: {e}")
+        safe_print(f"Failed to initialize multicast receiver: {e}")
     finally:
         if 'UDP_socket' in locals():
             UDP_socket.close()
 
 def showSystemcomponents():
-    print(f'Servers in System: {group_view_servers}')
-    print(f'Leading Server: {get_current_leader()}')
-    print(f'Clients in System: {group_view_clients}')
+    safe_print(f'Servers in System: {group_view_servers}')
+    safe_print(f'Leading Server: {get_current_leader()}')
+    safe_print(f'Clients in System: {group_view_clients}')
     
     # Also show unified group view
-    print("\n" + "="*30)
-    print("UNIFIED GROUP VIEW:")
+    safe_print("\n" + "="*30)
+    safe_print("UNIFIED GROUP VIEW:")
     print_system_status()
     
 
@@ -313,9 +315,9 @@ if __name__ == '__main__':
     
     # Add fault tolerance recovery callbacks
     def on_crash_recovery(failed_node_id):
-        print(f"Server crash detected: {failed_node_id}")
+        safe_print(f"Server crash detected: {failed_node_id}")
         if str(failed_node_id) == str(get_current_leader()):
-            print("Leader crashed, triggering election")
+            safe_print("Leader crashed, triggering election")
             trigger_election()
         # Remove from group views
         if int(failed_node_id) in group_view_servers:
@@ -329,11 +331,11 @@ if __name__ == '__main__':
         # Only process partition events if we have multiple nodes in the system
         if total_known_nodes > 1:
             if partition_detector.in_partition:
-                print(f"⚠️  Network partition detected! Reachable: {reachable_nodes}/{total_known_nodes}")
-                print("   Entering partition mode - pausing leader election until healed")
+                safe_print(f"⚠️  Network partition detected! Reachable: {reachable_nodes}/{total_known_nodes}")
+                safe_print("   Entering partition mode - pausing leader election until healed")
             else:
-                print(f"✅ Network partition healed! Reachable: {reachable_nodes}/{total_known_nodes}")
-                print("   Resuming normal operation and triggering leader election")
+                safe_print(f"✅ Network partition healed! Reachable: {reachable_nodes}/{total_known_nodes}")
+                safe_print("   Resuming normal operation and triggering leader election")
                 trigger_election()
     
     ft_manager.register_recovery_callback('crash', on_crash_recovery)
@@ -347,7 +349,7 @@ if __name__ == '__main__':
     
     # Add discovery callbacks
     def on_startup_complete():
-        print("Discovery startup phase completed")
+        safe_print("Discovery startup phase completed")
     
     def on_server_discovered(discovered_server_id):
         # Add to unified group view when server is discovered
@@ -376,16 +378,16 @@ if __name__ == '__main__':
     receiver_thread = threading.Thread(target=multicast_receiver, daemon=True)
     receiver_thread.start()
     
-    print("Server startup complete with fault tolerance enabled")
-    print("Discovery statistics:")
+    safe_print("Server startup complete with fault tolerance enabled")
+    safe_print("Discovery statistics:")
     stats = discovery_manager.get_discovery_statistics()
     for key, value in stats.items():
-        print(f"  {key}: {value}")
+        safe_print(f"  {key}: {value}")
     
-    print("\nFault tolerance statistics:")
+    safe_print("\nFault tolerance statistics:")
     ft_stats = ft_manager.get_fault_statistics()
     for key, value in ft_stats.items():
-        print(f"  {key}: {value}")
+        safe_print(f"  {key}: {value}")
     
     # Wait a bit for initial discovery, then show system status
     time.sleep(5)
@@ -395,9 +397,9 @@ if __name__ == '__main__':
     def periodic_status_display():
         while True:
             time.sleep(10)  # Display every 10 seconds
-            print("\n" + "="*50)
-            print("PERIODIC SYSTEM STATUS UPDATE")
-            print("="*50)
+            safe_print("\n" + "="*50)
+            safe_print("PERIODIC SYSTEM STATUS UPDATE")
+            safe_print("="*50)
             showSystemcomponents()
     
     status_thread = threading.Thread(target=periodic_status_display, daemon=True)
@@ -408,5 +410,5 @@ if __name__ == '__main__':
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nServer shutting down...")
+        safe_print("\nServer shutting down...")
         sys.exit(0)

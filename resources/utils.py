@@ -51,6 +51,15 @@ LARGE_BUFFER_SIZE = 10240              # Large buffer for multicast operations
 import socket
 import uuid
 import hashlib
+import threading
+
+# Thread-safe printing mechanism (shared across all modules)
+print_lock = threading.Lock()
+
+def safe_print(*args, **kwargs):
+    """Thread-safe print function to prevent output corruption"""
+    with print_lock:
+        print(*args, **kwargs)
 
 def generate_server_id(server_ip: str, hostname: str = None) -> int:
     """

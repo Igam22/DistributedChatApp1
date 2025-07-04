@@ -2,8 +2,10 @@ import socket
 import threading
 import time
 import uuid
+
 from resources.utils import MULTICAST_GROUP_ADDRESS, MULTICAST_IP, MULTICAST_PORT, BUFFER_SIZE, MULTICAST_TTL
 from resources.utils import group_view_clients
+from resources.utils import safe_print
 from DiscoveryManager import ClientDiscovery
 from FaultTolerance import initialize_fault_tolerance, get_fault_tolerance_manager
 
@@ -36,7 +38,7 @@ class ChatClient:
                 return self._advanced_connect()
                 
         except Exception as e:
-            print(f"Failed to connect: {e}")
+            safe_print(f"Failed to connect: {e}")
             return False
     
     def _simple_connect(self):
@@ -47,18 +49,18 @@ class ChatClient:
             # Send join request
             join_message = "join"
             self.socket.sendto(join_message.encode(), MULTICAST_GROUP_ADDRESS)
-            print(f"\nClient sent a join request to {MULTICAST_GROUP_ADDRESS}")
+            safe_print(f"\nClient sent a join request to {MULTICAST_GROUP_ADDRESS}")
             
             try:
                 data, addr = self.socket.recvfrom(BUFFER_SIZE)
-                print(f"\nClient Received from {addr}: {data.decode()}")
+                safe_print(f"\nClient Received from {addr}: {data.decode()}")
                 
                 # Add to group view
                 if addr not in group_view_clients:
                     group_view_clients.add(addr)
-                    print(f"Client {addr} added to clients_server set.")
+                    safe_print(f"Client {addr} added to clients_server set.")
                 else:
-                    print(f"Client {addr} already in clients_server set.")
+                    safe_print(f"Client {addr} already in clients_server set.")
                 
                 self.connected = True
                 self.socket.settimeout(3000)  # Long timeout for messaging
@@ -70,11 +72,11 @@ class ChatClient:
                 return True
                 
             except socket.timeout:
-                print("\nClient No response to join request")
+                safe_print("\nClient No response to join request")
                 return False
                 
         except Exception as e:
-            print(f"Simple connection failed: {e}")
+            safe_print(f"Simple connection failed: {e}")
             return False
     
     def _advanced_connect(self):
@@ -85,13 +87,13 @@ class ChatClient:
             response = client_discovery.discover_servers()
             
             if response is None:
-                print("Failed to discover any servers")
+                safe_print("Failed to discover any servers")
                 return False
             
             self.socket.settimeout(10)
             
-            print(f"Successfully connected to distributed chat system")
-            print(f"Server response: {response}")
+            safe_print(f"Successfully connected to distributed chat system")
+            safe_print(f"Server response: {response}")
             
             self.connected = True
             self.reconnect_attempts = 0
@@ -101,7 +103,7 @@ class ChatClient:
             
             # Add reconnection recovery callback
             def on_connection_failure(failed_node_id):
-                print(f"Connection failure detected, attempting reconnection...")
+                safe_print(f"Connection failure detected, attempting reconnection...")
                 self._attempt_reconnection()
             
             self.ft_manager.register_recovery_callback('crash', on_connection_failure)
@@ -113,7 +115,7 @@ class ChatClient:
             return True
             
         except Exception as e:
-            print(f"Advanced connection failed: {e}")
+            safe_print(f"Advanced connection failed: {e}")
             return False
     
     def start_heartbeat(self):
@@ -130,13 +132,13 @@ class ChatClient:
                 self.socket.sendto(heartbeat_msg.encode(), MULTICAST_GROUP_ADDRESS)
                 time.sleep(self.heartbeat_interval)
             except Exception as e:
-                print(f"Heartbeat failed: {e}")
+                safe_print(f"Heartbeat failed: {e}")
                 break
     
     def send_message(self, message):
         """Send a message to the chat system"""
         if not self.connected:
-            print("Not connected to chat system")
+            safe_print("Not connected to chat system")
             return False
         
         try:
@@ -151,17 +153,17 @@ class ChatClient:
                 
                 # Wait for response
                 response, server_addr = self.socket.recvfrom(1024)
-                print(f"Server response: {response.decode()}")
+                safe_print(f"Server response: {response.decode()}")
                 return True
             
         except Exception as e:
-            print(f"Failed to send message: {e}")
+            safe_print(f"Failed to send message: {e}")
             return False
     
     def request_status(self):
         """Request system status from the server"""
         if not self.connected:
-            print("Not connected to chat system")
+            safe_print("Not connected to chat system")
             return
         
         try:
@@ -170,32 +172,32 @@ class ChatClient:
             
             # Wait for response
             response, server_addr = self.socket.recvfrom(1024)
-            print(f"System Status: {response.decode()}")
+            safe_print(f"System Status: {response.decode()}")
             
         except Exception as e:
-            print(f"Failed to get status: {e}")
+            safe_print(f"Failed to get status: {e}")
     
     def _simple_receive_messages(self):
         """Simple message receiving (legacy MulticastSender functionality)"""
         while self.connected:
             try:
                 data, server = self.socket.recvfrom(BUFFER_SIZE)
-                print(f"\nReceived message from {server}: {data.decode()}")
+                safe_print(f"\nReceived message from {server}: {data.decode()}")
             except socket.timeout:
                 continue  # Keep trying
             except Exception as e:
-                print(f"Error receiving message: {e}")
+                safe_print(f"Error receiving message: {e}")
                 break
     
     def simple_interactive_mode(self):
         """Simple interactive mode (legacy MulticastSender functionality)"""
         if not self.connect():
-            print("Failed to connect in simple mode")
+            safe_print("Failed to connect in simple mode")
             return
         
-        print(f"\nSimple chat mode active for {self.username}")
-        print("Type 'exit' to quit")
-        print("-" * 30)
+        safe_print(f"\nSimple chat mode active for {self.username}")
+        safe_print("Type 'exit' to quit")
+        safe_print("-" * 30)
         
         try:
             while self.connected:
@@ -205,7 +207,7 @@ class ChatClient:
                 if message.strip():
                     self.send_message(message)
         except KeyboardInterrupt:
-            print("\nInterrupted by user")
+            safe_print("\nInterrupted by user")
         finally:
             self.disconnect()
     
@@ -216,16 +218,16 @@ class ChatClient:
             self.ft_manager.stop()
         if self.socket:
             self.socket.close()
-        print(f"Client {self.username} disconnected")
+        safe_print(f"Client {self.username} disconnected")
     
     def _attempt_reconnection(self):
         """Attempt to reconnect to the system"""
         if self.reconnect_attempts >= self.max_reconnect_attempts:
-            print(f"Max reconnection attempts ({self.max_reconnect_attempts}) reached")
+            safe_print(f"Max reconnection attempts ({self.max_reconnect_attempts}) reached")
             return False
         
         self.reconnect_attempts += 1
-        print(f"Reconnection attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
+        safe_print(f"Reconnection attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
         
         # Disconnect current connection
         self.connected = False
@@ -237,10 +239,10 @@ class ChatClient:
         
         # Attempt to reconnect
         if self.connect():
-            print("Reconnection successful!")
+            safe_print("Reconnection successful!")
             return True
         else:
-            print(f"Reconnection attempt {self.reconnect_attempts} failed")
+            safe_print(f"Reconnection attempt {self.reconnect_attempts} failed")
             return False
     
     def interactive_mode(self):
@@ -248,12 +250,12 @@ class ChatClient:
         if not self.connect():
             return
         
-        print(f"\nWelcome to the distributed chat system, {self.username}!")
-        print("Available commands:")
-        print("  - Type any message to send it")
-        print("  - '/status' to get system status")
-        print("  - '/quit' to exit")
-        print("-" * 50)
+        safe_print(f"\nWelcome to the distributed chat system, {self.username}!")
+        safe_print("Available commands:")
+        safe_print("  - Type any message to send it")
+        safe_print("  - '/status' to get system status")
+        safe_print("  - '/quit' to exit")
+        safe_print("-" * 50)
         
         try:
             while self.connected:
@@ -267,7 +269,7 @@ class ChatClient:
                     self.send_message(user_input)
                     
         except KeyboardInterrupt:
-            print("\nInterrupted by user")
+            safe_print("\nInterrupted by user")
         finally:
             self.disconnect()
 
@@ -288,10 +290,10 @@ def main():
     client = ChatClient(username, simple_mode=simple_mode)
     
     if simple_mode:
-        print("Starting client in simple mode (legacy MulticastSender functionality)")
+        safe_print("Starting client in simple mode (legacy MulticastSender functionality)")
         client.simple_interactive_mode()
     else:
-        print("Starting client in advanced mode (enhanced ChatClient functionality)")
+        safe_print("Starting client in advanced mode (enhanced ChatClient functionality)")
         client.interactive_mode()
 
 if __name__ == "__main__":

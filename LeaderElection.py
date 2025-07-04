@@ -2,7 +2,7 @@ import socket
 import threading
 import time
 import json
-from resources.utils import group_view_servers, current_leader, leader_election_in_progress, my_server_id, MULTICAST_GROUP_ADDRESS
+from resources.utils import group_view_servers, current_leader, leader_election_in_progress, my_server_id, MULTICAST_GROUP_ADDRESS, safe_print
 
 class BullyLeaderElection:
     def __init__(self, server_id, server_ip):
@@ -68,7 +68,7 @@ class BullyLeaderElection:
             sock.sendto(msg_str.encode(), MULTICAST_GROUP_ADDRESS)
             sock.close()
         except Exception as e:
-            print(f"Error sending message to {target_server}: {e}")
+            safe_print(f"Error sending message to {target_server}: {e}")
     
     def start_election(self):
         """Start the bully election process"""
@@ -78,7 +78,7 @@ class BullyLeaderElection:
             return  # Election already in progress
             
         leader_election_in_progress = True
-        print(f"Server {self.server_id} starting election")
+        safe_print(f"Server {self.server_id} starting election")
         
         higher_priority_servers = self.get_higher_priority_servers()
         
@@ -112,7 +112,7 @@ class BullyLeaderElection:
         current_leader = self.server_id
         leader_election_in_progress = False
         
-        print(f"Server {self.server_id} is now the leader")
+        safe_print(f"Server {self.server_id} is now the leader")
         self.send_coordinator_message()
     
     def handle_election_message(self, sender_id, sender_ip):
@@ -136,7 +136,7 @@ class BullyLeaderElection:
         
         current_leader = sender_id
         leader_election_in_progress = False
-        print(f"Server {sender_id} is now the leader")
+        safe_print(f"Server {sender_id} is now the leader")
     
     def process_election_message(self, message):
         """Process incoming election-related messages"""
@@ -187,6 +187,6 @@ def detect_leader_failure():
     """Detect if the current leader has failed"""
     global current_leader
     if current_leader and current_leader not in group_view_servers:
-        print(f"Leader {current_leader} has failed, triggering election")
+        safe_print(f"Leader {current_leader} has failed, triggering election")
         current_leader = None
         trigger_election()

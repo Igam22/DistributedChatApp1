@@ -1,7 +1,7 @@
 import time
 import threading
 from typing import Dict, Set, List, Optional, Tuple
-from resources.utils import group_view_servers, group_view_clients, server_last_seen, current_leader
+from resources.utils import group_view_servers, group_view_clients, server_last_seen, current_leader, safe_print
 
 class Participant:
     """Represents a participant in the distributed system"""
@@ -187,7 +187,7 @@ class GroupView:
             try:
                 callback(event_type, participant)
             except Exception as e:
-                print(f"Error in event callback: {e}")
+                safe_print(f"Error in event callback: {e}")
     
     def _cleanup_loop(self):
         """Background cleanup loop for inactive participants"""
@@ -209,7 +209,7 @@ class GroupView:
             for participant_id in inactive_participants:
                 if participant_id in self.participants:
                     participant = self.participants.pop(participant_id)
-                    print(f"Removed inactive {participant.type}: {participant.id}")
+                    safe_print(f"Removed inactive {participant.type}: {participant.id}")
                     self._notify_event('timeout', participant)
     
     def sync_with_legacy_views(self):
@@ -248,26 +248,26 @@ def stop_group_view():
 def print_system_status():
     """Print comprehensive system status"""
     status = group_view.get_system_status()
-    print("\n" + "="*50)
-    print("DISTRIBUTED SYSTEM STATUS")
-    print("="*50)
-    print(f"Total Participants: {status['total_participants']}")
-    print(f"Active Participants: {status['active_participants']}")
-    print(f"Servers: {status['participant_counts']['active_servers']}/{status['participant_counts']['servers']}")
-    print(f"Clients: {status['participant_counts']['active_clients']}/{status['participant_counts']['clients']}")
+    safe_print("\n" + "="*50)
+    safe_print("DISTRIBUTED SYSTEM STATUS")
+    safe_print("="*50)
+    safe_print(f"Total Participants: {status['total_participants']}")
+    safe_print(f"Active Participants: {status['active_participants']}")
+    safe_print(f"Servers: {status['participant_counts']['active_servers']}/{status['participant_counts']['servers']}")
+    safe_print(f"Clients: {status['participant_counts']['active_clients']}/{status['participant_counts']['clients']}")
     
     leader_info = status['current_leader']
     if leader_info:
-        print(f"Current Leader: {leader_info['hostname']} (ID: {leader_info['id']})")
+        safe_print(f"Current Leader: {leader_info['hostname']} (ID: {leader_info['id']})")
     else:
-        print("Current Leader: None")
+        safe_print("Current Leader: None")
     
-    print("\nACTIVE PARTICIPANTS:")
-    print("-" * 50)
+    safe_print("\nACTIVE PARTICIPANTS:")
+    safe_print("-" * 50)
     for participant in status['participants']:
         if participant['is_active']:
             uptime = int(participant['uptime'])
-            print(f"{participant['type'].upper()}: {participant['id']} "
+            safe_print(f"{participant['type'].upper()}: {participant['id']} "
                   f"({participant['hostname']}) - Uptime: {uptime}s")
     
-    print("="*50)
+    safe_print("="*50)
