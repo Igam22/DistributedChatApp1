@@ -1,6 +1,7 @@
 import socket
 import threading
 import time
+import sys
 from resources.utils import group_view_servers
 from resources.utils import group_view_clients
 from resources.utils import server_last_seen
@@ -231,3 +232,23 @@ if __name__ == '__main__':
     # Wait a bit for initial discovery, then show system status
     time.sleep(5)
     showSystemcomponents()
+    
+    # Start periodic system status display
+    def periodic_status_display():
+        while True:
+            time.sleep(10)  # Display every 10 seconds
+            print("\n" + "="*50)
+            print("PERIODIC SYSTEM STATUS UPDATE")
+            print("="*50)
+            showSystemcomponents()
+    
+    status_thread = threading.Thread(target=periodic_status_display, daemon=True)
+    status_thread.start()
+    
+    # Keep main thread alive to allow daemon threads to continue
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nServer shutting down...")
+        sys.exit(0)
