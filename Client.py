@@ -2,14 +2,15 @@ import socket
 import threading
 import time
 import uuid
-from resources.utils import MULTICAST_GROUP_ADDRESS
+from resources.utils import MULTICAST_GROUP_ADDRESS, MULTICAST_IP, MULTICAST_PORT, BUFFER_SIZE, MULTICAST_TTL
+from resources.utils import group_view_clients
 from DiscoveryManager import ClientDiscovery
 from FaultTolerance import initialize_fault_tolerance, get_fault_tolerance_manager
 
 class ChatClient:
     """Enhanced chat client with heartbeat and group view support"""
     
-    def __init__(self, username=None):
+    def __init__(self, username=None, simple_mode=False):
         self.username = username or f"User_{uuid.uuid4().hex[:8]}"
         self.client_id = f"{self.username}_{uuid.uuid4().hex[:8]}"
         self.socket = None
@@ -19,9 +20,65 @@ class ChatClient:
         self.ft_manager = None
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
+        self.simple_mode = simple_mode
+        self.receiver_thread = None
         
     def connect(self):
-        """Connect to the distributed chat system with enhanced discovery"""
+        """Connect to the distributed chat system with enhanced discovery or simple mode"""
+        try:
+            # Create socket for communication
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
+            
+            if self.simple_mode:
+                return self._simple_connect()
+            else:
+                return self._advanced_connect()
+                
+        except Exception as e:
+            print(f"Failed to connect: {e}")
+            return False
+    
+    def _simple_connect(self):
+        """Simple connection mode (legacy MulticastSender functionality)"""
+        try:
+            self.socket.settimeout(3)
+            
+            # Send join request
+            join_message = "join"
+            self.socket.sendto(join_message.encode(), MULTICAST_GROUP_ADDRESS)
+            print(f"\nClient sent a join request to {MULTICAST_GROUP_ADDRESS}")
+            
+            try:
+                data, addr = self.socket.recvfrom(BUFFER_SIZE)
+                print(f"\nClient Received from {addr}: {data.decode()}")
+                
+                # Add to group view
+                if addr not in group_view_clients:
+                    group_view_clients.add(addr)
+                    print(f"Client {addr} added to clients_server set.")
+                else:
+                    print(f"Client {addr} already in clients_server set.")
+                
+                self.connected = True
+                self.socket.settimeout(3000)  # Long timeout for messaging
+                
+                # Start receiver thread for simple mode
+                self.receiver_thread = threading.Thread(target=self._simple_receive_messages, daemon=True)
+                self.receiver_thread.start()
+                
+                return True
+                
+            except socket.timeout:
+                print("\nClient No response to join request")
+                return False
+                
+        except Exception as e:
+            print(f"Simple connection failed: {e}")
+            return False
+    
+    def _advanced_connect(self):
+        """Advanced connection mode with discovery and fault tolerance"""
         try:
             # Use enhanced discovery manager
             client_discovery = ClientDiscovery(self.client_id, max_retries=3, timeout=5)
@@ -31,8 +88,6 @@ class ChatClient:
                 print("Failed to discover any servers")
                 return False
             
-            # Create socket for communication
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.settimeout(10)
             
             print(f"Successfully connected to distributed chat system")
@@ -58,7 +113,7 @@ class ChatClient:
             return True
             
         except Exception as e:
-            print(f"Failed to connect: {e}")
+            print(f"Advanced connection failed: {e}")
             return False
     
     def start_heartbeat(self):
@@ -85,13 +140,19 @@ class ChatClient:
             return False
         
         try:
-            formatted_msg = f"[{self.username}]: {message}"
-            self.socket.sendto(formatted_msg.encode(), MULTICAST_GROUP_ADDRESS)
-            
-            # Wait for response
-            response, server_addr = self.socket.recvfrom(1024)
-            print(f"Server response: {response.decode()}")
-            return True
+            if self.simple_mode:
+                # Simple mode: send raw message
+                self.socket.sendto(message.encode(), MULTICAST_GROUP_ADDRESS)
+                return True
+            else:
+                # Advanced mode: formatted message with response
+                formatted_msg = f"[{self.username}]: {message}"
+                self.socket.sendto(formatted_msg.encode(), MULTICAST_GROUP_ADDRESS)
+                
+                # Wait for response
+                response, server_addr = self.socket.recvfrom(1024)
+                print(f"Server response: {response.decode()}")
+                return True
             
         except Exception as e:
             print(f"Failed to send message: {e}")
@@ -113,6 +174,40 @@ class ChatClient:
             
         except Exception as e:
             print(f"Failed to get status: {e}")
+    
+    def _simple_receive_messages(self):
+        """Simple message receiving (legacy MulticastSender functionality)"""
+        while self.connected:
+            try:
+                data, server = self.socket.recvfrom(BUFFER_SIZE)
+                print(f"\nReceived message from {server}: {data.decode()}")
+            except socket.timeout:
+                continue  # Keep trying
+            except Exception as e:
+                print(f"Error receiving message: {e}")
+                break
+    
+    def simple_interactive_mode(self):
+        """Simple interactive mode (legacy MulticastSender functionality)"""
+        if not self.connect():
+            print("Failed to connect in simple mode")
+            return
+        
+        print(f"\nSimple chat mode active for {self.username}")
+        print("Type 'exit' to quit")
+        print("-" * 30)
+        
+        try:
+            while self.connected:
+                message = input("\nSend message or type exit: ")
+                if message.lower() == 'exit':
+                    break
+                if message.strip():
+                    self.send_message(message)
+        except KeyboardInterrupt:
+            print("\nInterrupted by user")
+        finally:
+            self.disconnect()
     
     def disconnect(self):
         """Disconnect from the chat system"""
@@ -181,11 +276,23 @@ def main():
     import sys
     
     username = None
-    if len(sys.argv) > 1:
-        username = sys.argv[1]
+    simple_mode = False
     
-    client = ChatClient(username)
-    client.interactive_mode()
+    # Parse command line arguments
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg == '--simple' or arg == '-s':
+            simple_mode = True
+        elif not username:
+            username = arg
+    
+    client = ChatClient(username, simple_mode=simple_mode)
+    
+    if simple_mode:
+        print("Starting client in simple mode (legacy MulticastSender functionality)")
+        client.simple_interactive_mode()
+    else:
+        print("Starting client in advanced mode (enhanced ChatClient functionality)")
+        client.interactive_mode()
 
 if __name__ == "__main__":
     main()

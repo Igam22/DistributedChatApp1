@@ -2,11 +2,17 @@ import socket
 import threading
 import time
 import sys
+import struct
+import json
 from resources.utils import group_view_servers
 from resources.utils import group_view_clients
 from resources.utils import server_last_seen
+from resources.utils import client_last_seen
 from resources.utils import MULTICAST_GROUP_ADDRESS
-from LeaderElection import initialize_election, trigger_election, detect_leader_failure, get_current_leader
+from resources.utils import MULTICAST_IP
+from resources.utils import MULTICAST_PORT
+from resources.utils import BUFFER_SIZE
+from LeaderElection import initialize_election, trigger_election, detect_leader_failure, get_current_leader, handle_election_message
 from GroupView import get_group_view, start_group_view, print_system_status
 from DiscoveryManager import DiscoveryManager
 from FaultTolerance import initialize_fault_tolerance, get_fault_tolerance_manager
@@ -138,6 +144,154 @@ def start_server_discovery():
     cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
     cleanup_thread.start()
 
+def multicast_receiver():
+    """
+    Integrated multicast receiver that handles all incoming messages.
+    This replaces the functionality of MulticastReceiver.py
+    """
+    try:
+        # Create UDP socket for receiving multicast messages
+        UDP_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        UDP_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        UDP_socket.bind(('', MULTICAST_PORT))
+        
+        # Join multicast group
+        mreq = struct.pack("4sl", socket.inet_aton(MULTICAST_IP), socket.INADDR_ANY)
+        UDP_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        
+        print(f"Multicast receiver listening on: {MULTICAST_GROUP_ADDRESS}")
+        
+        while True:
+            try:
+                data, client_addr = UDP_socket.recvfrom(BUFFER_SIZE)
+                msg = data.decode()
+                print(f"Received message from {client_addr}: {msg}")
+                
+                # Handle message with fault tolerance if available
+                ft_manager = get_fault_tolerance_manager()
+                if ft_manager:
+                    processed_msg = ft_manager.handle_message(msg, client_addr)
+                    if processed_msg:
+                        if processed_msg.get('type') == 'heartbeat_ack':
+                            # Send heartbeat acknowledgment
+                            response = json.dumps(processed_msg)
+                            UDP_socket.sendto(response.encode(), client_addr)
+                            continue
+                
+                response = None
+                
+                # Handle client join messages
+                if msg == "join" or msg.startswith("join:"):
+                    if msg.startswith("join:"):
+                        parts = msg.split(":")
+                        client_id = parts[1] if len(parts) > 1 else f"{client_addr[0]}:{client_addr[1]}"
+                    else:
+                        client_id = f"{client_addr[0]}:{client_addr[1]}"
+                    
+                    print(f"\nClient {client_id} at {client_addr} wants to join.")
+                    
+                    # Add client to legacy view for backward compatibility
+                    group_view_clients.add(client_addr)
+                    client_last_seen[client_addr] = time.time()
+                    
+                    # Add client to unified group view
+                    group_view = get_group_view()
+                    group_view.add_participant(client_id, 'client', client_addr)
+                    
+                    leader_id = get_current_leader()
+                    leader_name = socket.gethostname() if leader_id else "No leader elected"
+                    response = f"\nWelcome {client_id}! Current Leader: {leader_name} (ID: {leader_id})"
+                
+                # Handle server announcements
+                elif msg.startswith("SERVER_ALIVE:"):
+                    parts = msg.split(":")
+                    if len(parts) >= 3:
+                        server_ip = parts[1]
+                        server_name = parts[2]
+                        discovered_server_id = generate_server_id(server_ip, server_name)
+                        
+                        # Don't process our own announcements
+                        if discovered_server_id != server_id:
+                            # Add to legacy views for backward compatibility
+                            group_view_servers.add(discovered_server_id)
+                            server_last_seen[discovered_server_id] = time.time()
+                            
+                            # Add to unified group view
+                            group_view = get_group_view()
+                            group_view.add_participant(str(discovered_server_id), 'server', (server_ip, 0), server_name)
+                            
+                            print(f"Discovered server: {server_name} at {server_ip} (ID: {discovered_server_id})")
+                            
+                            # Trigger election when new server joins
+                            if len(group_view_servers) > 1:
+                                trigger_election()
+                        else:
+                            print(f"Ignoring own announcement from {server_name} (ID: {discovered_server_id})")
+                    continue  # Don't send response for server announcements
+                
+                # Handle server probes
+                elif msg.startswith("SERVER_PROBE:"):
+                    parts = msg.split(":")
+                    if len(parts) >= 3:
+                        probe_server_id = parts[2]
+                        if probe_server_id != str(server_id):
+                            response = f"SERVER_RESPONSE:{hostname}:{server_ip}"
+                            print(f"Responding to server probe from {parts[1]} (Server ID: {probe_server_id})")
+                        else:
+                            print(f"Ignoring probe from self: {probe_server_id}")
+                            continue
+                    elif len(parts) >= 2:
+                        # Legacy probe format
+                        response = f"SERVER_RESPONSE:{hostname}:{server_ip}"
+                        print(f"Responding to legacy server probe from {parts[1]}")
+                    else:
+                        continue
+                
+                # Handle client heartbeats
+                elif msg.startswith("CLIENT_HEARTBEAT:"):
+                    parts = msg.split(":")
+                    if len(parts) >= 2:
+                        client_id = parts[1]
+                        # Update client activity
+                        client_last_seen[client_addr] = time.time()
+                        group_view = get_group_view()
+                        group_view.update_participant_activity(client_id)
+                        print(f"Received heartbeat from client {client_id}")
+                    continue  # Don't send response for heartbeat messages
+                
+                # Handle system status requests
+                elif msg == "status":
+                    print_system_status()
+                    group_view = get_group_view()
+                    status = group_view.get_system_status()
+                    response = f"\nSystem Status - Servers: {status['participant_counts']['active_servers']}, Clients: {status['participant_counts']['active_clients']}"
+                
+                # Handle election messages
+                else:
+                    try:
+                        election_msg = json.loads(msg)
+                        if election_msg.get("type") in ["ELECTION", "OK", "COORDINATOR"]:
+                            handle_election_message(election_msg)
+                            continue  # Don't send response for election messages
+                    except json.JSONDecodeError:
+                        pass
+                    
+                    response = f"\nYour message was received by {hostname}!"
+                
+                # Send response if one was generated
+                if response:
+                    UDP_socket.sendto(response.encode(), client_addr)
+                    
+            except Exception as e:
+                print(f"Error in multicast receiver: {e}")
+                continue
+                
+    except Exception as e:
+        print(f"Failed to initialize multicast receiver: {e}")
+    finally:
+        if 'UDP_socket' in locals():
+            UDP_socket.close()
+
 def showSystemcomponents():
     print(f'Servers in System: {group_view_servers}')
     print(f'Leading Server: {get_current_leader()}')
@@ -217,6 +371,10 @@ if __name__ == '__main__':
     
     # Start enhanced discovery (this will handle timing and elections)
     discovery_manager.start_discovery()
+    
+    # Start integrated multicast receiver
+    receiver_thread = threading.Thread(target=multicast_receiver, daemon=True)
+    receiver_thread.start()
     
     print("Server startup complete with fault tolerance enabled")
     print("Discovery statistics:")
