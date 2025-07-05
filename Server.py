@@ -180,6 +180,9 @@ def multicast_receiver():
                             response = json.dumps(processed_msg)
                             UDP_socket.sendto(response.encode(), client_addr)
                             continue
+                        elif processed_msg.get('type') == 'passthrough':
+                            # Plain text message passed through fault tolerance
+                            msg = processed_msg.get('message', msg)
                 
                 response = None
                 

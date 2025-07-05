@@ -126,7 +126,7 @@ class PartitionDetector:
         
         # Check if we're in a partition (need majority of known nodes)
         reachable_nodes = len(self.reachable_nodes)
-        partition_threshold = total_nodes * 0.5  # Majority
+        partition_threshold = max(1, total_nodes * 0.5)  # At least 1 node required
         
         was_in_partition = self.in_partition
         self.in_partition = reachable_nodes < partition_threshold
@@ -160,11 +160,18 @@ class PartitionDetector:
             
             # Wait for response
             response, addr = sock.recvfrom(1024)
-            response_data = json.loads(response.decode())
+            response_text = response.decode()
             
-            if (response_data.get('type') == MessageType.PARTITION_PROBE and 
-                response_data.get('target_id') == self.node_id):
-                return True
+            try:
+                # Try to parse as JSON first
+                response_data = json.loads(response_text)
+                if (response_data.get('type') == MessageType.PARTITION_PROBE and 
+                    response_data.get('target_id') == self.node_id):
+                    return True
+            except json.JSONDecodeError:
+                # Handle plain text responses (any response means node is alive)
+                if response_text:
+                    return True
                 
         except Exception as e:
             safe_log("DEBUG", f"Failed to probe node {node_id}: {e}")
@@ -188,7 +195,7 @@ class FaultToleranceManager:
         
         # Failure detection
         self.heartbeat_interval = 5  # seconds
-        self.failure_timeout = 15  # seconds
+        self.failure_timeout = 30  # seconds (increased to reduce false positives)
         self.node_last_seen: Dict[str, float] = {}
         self.failed_nodes: Set[str] = set()
         
@@ -282,8 +289,13 @@ class FaultToleranceManager:
                     self.fault_stats[FaultType.BYZANTINE] += 1
                     
         except json.JSONDecodeError:
-            safe_log("WARNING", f"Corrupted message from {sender_addr}: {raw_message}")
-            self.fault_stats[FaultType.BYZANTINE] += 1
+            # Handle plain text messages (SERVER_ALIVE, CLIENT_HEARTBEAT, etc.)
+            if raw_message.startswith(("SERVER_ALIVE:", "CLIENT_HEARTBEAT:", "join", "status")):
+                # Valid plain text message, pass through without fault tolerance processing
+                return {'type': 'passthrough', 'message': raw_message}
+            else:
+                safe_log("WARNING", f"Corrupted message from {sender_addr}: {raw_message}")
+                self.fault_stats[FaultType.BYZANTINE] += 1
         except Exception as e:
             safe_log("ERROR", f"Error handling message from {sender_addr}: {e}")
             self.fault_stats[FaultType.OMISSION] += 1
