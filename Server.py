@@ -11,6 +11,7 @@ import threading
 import time
 import json
 import hashlib
+from datetime import datetime
 
 # Configuration
 MULTICAST_IP = '224.1.1.1'
@@ -20,7 +21,8 @@ BUFFER_SIZE = 1024
 
 # Global state
 servers = {}  # {server_id: {'ip': ip, 'hostname': hostname, 'last_seen': timestamp}}
-clients = set()  # Set of (ip, port) tuples
+clients = {}  # {(ip, port): {'username': username, 'group': group, 'joined_at': timestamp}}
+groups = {}   # {group_name: set of (ip, port) tuples}
 
 def get_local_ip():
     """Get local IP address"""
@@ -106,27 +108,84 @@ class ChatServer:
                         }
                         print(f"📡 Discovered server: {server_hostname} (ID: {server_id}) at {server_ip}")
             
-            elif message.startswith("join"):
+            elif message.startswith("join:"):
                 # Handle client join
-                clients.add(sender_addr)
-                print(f"👤 Client joined: {sender_addr}")
-                response = f"Welcome! Server: {self.hostname} (ID: {self.server_id})"
+                parts = message.split(":")
+                username = parts[1] if len(parts) > 1 else "Unknown"
+                group = parts[2] if len(parts) > 2 else "general"
+                
+                clients[sender_addr] = {
+                    'username': username,
+                    'group': group,
+                    'joined_at': time.time()
+                }
+                
+                # Add to group
+                if group not in groups:
+                    groups[group] = set()
+                groups[group].add(sender_addr)
+                
+                print(f"👤 Client joined: {username} in group '{group}' from {sender_addr}")
+                response = f"Welcome {username} to group '{group}'! Server: {self.hostname} (ID: {self.server_id})"
                 self.sender_socket.sendto(response.encode(), sender_addr)
+            
+            elif message.startswith("leave:"):
+                # Handle client leave
+                parts = message.split(":")
+                username = parts[1] if len(parts) > 1 else "Unknown"
+                group = parts[2] if len(parts) > 2 else "general"
+                
+                if sender_addr in clients:
+                    client_info = clients.pop(sender_addr)
+                    # Remove from group
+                    if group in groups:
+                        groups[group].discard(sender_addr)
+                        if not groups[group]:  # Remove empty group
+                            groups.pop(group)
+                    print(f"👋 Client left: {username} from group '{group}' at {sender_addr}")
+                else:
+                    print(f"⚠️  Unknown client tried to leave: {username} from {sender_addr}")
             
             elif message == "status":
                 # Handle status request
                 status = {
                     'servers': len(servers) + 1,  # +1 for this server
                     'clients': len(clients),
+                    'groups': {group: len(members) for group, members in groups.items()},
                     'server_id': self.server_id
                 }
                 response = f"Status: {json.dumps(status)}"
                 self.sender_socket.sendto(response.encode(), sender_addr)
             
+            elif message.startswith("group_msg:"):
+                # Handle group message
+                parts = message.split(":", 3)
+                if len(parts) >= 4:
+                    msg_group = parts[1]
+                    msg_username = parts[2]
+                    msg_content = parts[3]
+                    
+                    print(f"💬 Group message from {msg_username} in '{msg_group}': {msg_content}")
+                    
+                    # Forward to all clients in the same group (except sender)
+                    if msg_group in groups:
+                        for client_addr in groups[msg_group]:
+                            if client_addr != sender_addr:
+                                forward_msg = f"[{msg_group}] {msg_username}: {msg_content}"
+                                try:
+                                    self.sender_socket.sendto(forward_msg.encode(), client_addr)
+                                except Exception as e:
+                                    print(f"Failed to forward message to {client_addr}: {e}")
+                    
+                    # Send acknowledgment to sender
+                    response = f"Message sent to group '{msg_group}'"
+                    self.sender_socket.sendto(response.encode(), sender_addr)
+            
             else:
-                # Handle chat message
+                # Handle other messages
                 if sender_addr in clients:
-                    print(f"💬 Message from {sender_addr}: {message}")
+                    username = clients[sender_addr]['username']
+                    print(f"💬 Message from {username} ({sender_addr}): {message}")
                     response = f"Message received by {self.hostname}"
                     self.sender_socket.sendto(response.encode(), sender_addr)
                 
@@ -188,16 +247,20 @@ class ChatServer:
     
     def show_status(self):
         """Display current status"""
+        timestamp = datetime.now().strftime("%d.%m.%y %H:%M:%S")
         print("\n" + "="*50)
-        print("📊 SERVER STATUS")
+        print(f"📊 SERVER STATUS - {timestamp}")
         print("="*50)
         print(f"This Server: {self.hostname} (ID: {self.server_id}) at {self.ip}")
         print(f"Known Servers: {len(servers)}")
         for server_id, info in servers.items():
             print(f"  - {info['hostname']} (ID: {server_id}) at {info['ip']}")
         print(f"Connected Clients: {len(clients)}")
-        for client in clients:
-            print(f"  - {client}")
+        for client_addr, client_info in clients.items():
+            print(f"  - {client_info['username']} in group '{client_info['group']}' at {client_addr}")
+        print(f"Active Groups: {len(groups)}")
+        for group_name, members in groups.items():
+            print(f"  - {group_name}: {len(members)} members")
         print("="*50 + "\n")
     
     def status_thread(self):
