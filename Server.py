@@ -5,7 +5,7 @@ Simple Distributed Chat Server
 - Basic server discovery
 - Clean, minimal implementation
 
-Version: 0.2.0
+Version: 0.3.0
 """
 
 import socket
@@ -20,7 +20,7 @@ from datetime import datetime
 from LeaderElection import LeaderElection, NodeIdentifier
 
 # Version
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 # Configuration
 MULTICAST_IP = '224.1.1.1'
@@ -146,7 +146,8 @@ class ChatServer:
                 clients[sender_addr] = {
                     'username': username,
                     'group': group,
-                    'joined_at': time.time()
+                    'joined_at': time.time(),
+                    'last_heartbeat': time.time()
                 }
                 
                 # Add to group
@@ -174,6 +175,32 @@ class ChatServer:
                     print(f"👋 Client left: {username} from group '{group}' at {sender_addr}")
                 else:
                     print(f"⚠️  Unknown client tried to leave: {username} from {sender_addr}")
+            
+            elif message.startswith("client_heartbeat:"):
+                # Handle client heartbeat
+                parts = message.split(":")
+                username = parts[1] if len(parts) > 1 else "Unknown"
+                group = parts[2] if len(parts) > 2 else "general"
+                
+                if sender_addr in clients:
+                    # Update last heartbeat time
+                    clients[sender_addr]['last_heartbeat'] = time.time()
+                    # Optionally log heartbeat (commented out to avoid spam)
+                    # print(f"💓 Heartbeat from {username} ({sender_addr})")
+                else:
+                    # Client not in our records, treat as new join
+                    print(f"💓 Heartbeat from unknown client {username}, treating as join")
+                    clients[sender_addr] = {
+                        'username': username,
+                        'group': group,
+                        'joined_at': time.time(),
+                        'last_heartbeat': time.time()
+                    }
+                    
+                    # Add to group
+                    if group not in groups:
+                        groups[group] = set()
+                    groups[group].add(sender_addr)
             
             elif message == "status":
                 # Handle status request
@@ -268,11 +295,43 @@ class ChatServer:
             server_info = servers.pop(server_id)
             print(f"🔴 Server timeout: {server_info['hostname']} (ID: {server_id})")
     
+    def cleanup_dead_clients(self):
+        """Remove clients that haven't sent heartbeats recently"""
+        current_time = time.time()
+        dead_clients = []
+        client_timeout = 25.0  # 25 second timeout (longer than client's 20s to avoid false positives)
+        
+        for client_addr, client_info in clients.items():
+            # Check if client has last_heartbeat field (for backward compatibility)
+            if 'last_heartbeat' in client_info:
+                time_since_heartbeat = current_time - client_info['last_heartbeat']
+                if time_since_heartbeat > client_timeout:
+                    dead_clients.append(client_addr)
+            else:
+                # Fallback to joined_at if no heartbeat info
+                time_since_join = current_time - client_info['joined_at']
+                if time_since_join > client_timeout:
+                    dead_clients.append(client_addr)
+        
+        for client_addr in dead_clients:
+            client_info = clients.pop(client_addr)
+            username = client_info['username']
+            group = client_info['group']
+            
+            # Remove from group
+            if group in groups:
+                groups[group].discard(client_addr)
+                if not groups[group]:  # Remove empty group
+                    groups.pop(group)
+                    
+            print(f"💀 Client timeout: {username} from group '{group}' at {client_addr}")
+    
     def cleanup_thread(self):
         """Thread function for periodic cleanup"""
         while self.running:
             time.sleep(15)  # Cleanup every 15 seconds
             self.cleanup_dead_servers()
+            self.cleanup_dead_clients()
     
     def show_status(self):
         """Display current status"""

@@ -6,7 +6,7 @@ Leader Election using Bully Algorithm
 - Uses node identification based on IP+Port+ProcessID for uniqueness
 - Maintains Group View (membership view) of all active nodes
 
-Version: 0.2.0
+Version: 0.3.0
 
 Node Identification:
 - In distributed systems, nodes are commonly identified using a combination of:
@@ -32,7 +32,7 @@ from enum import Enum
 from typing import Dict, Set, Optional, Tuple
 
 # Version
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 class NodeState(Enum):
     """Node states in the election process"""
@@ -191,6 +191,7 @@ class LeaderElection:
         
         # Networking
         self.socket = None
+        self.receiver_socket = None
         self.running = False
         
         # Threading
@@ -200,10 +201,23 @@ class LeaderElection:
     def setup_socket(self):
         """Setup UDP socket for election messages"""
         try:
+            # Sender socket
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
             self.socket.settimeout(1.0)
+            
+            # Receiver socket for listening to election messages
+            self.receiver_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.receiver_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.receiver_socket.bind(('', self.multicast_group[1]))
+            
+            # Join multicast group
+            import struct
+            mreq = struct.pack("4sl", socket.inet_aton(self.multicast_group[0]), socket.INADDR_ANY)
+            self.receiver_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            self.receiver_socket.settimeout(1.0)
+            
             return True
         except Exception as e:
             print(f"❌ LeaderElection socket setup failed: {e}")
@@ -241,6 +255,8 @@ class LeaderElection:
         self.running = False
         if self.socket:
             self.socket.close()
+        if self.receiver_socket:
+            self.receiver_socket.close()
             
     def trigger_election(self, reason: str):
         """
@@ -341,12 +357,138 @@ class LeaderElection:
         """Monitor for election messages and handle them"""
         while self.running:
             try:
-                # This would normally receive and process election messages
-                # For simplicity, we're focusing on the algorithm structure
-                time.sleep(1.0)
+                # Receive and process election messages
+                data, sender_addr = self.receiver_socket.recvfrom(1024)
+                message_str = data.decode().strip()
+                
+                # Skip our own messages
+                if sender_addr[0] == self.node_id.ip:
+                    continue
+                
+                try:
+                    message = json.loads(message_str)
+                    self._handle_election_message(message, sender_addr)
+                except json.JSONDecodeError:
+                    # Ignore non-JSON messages (could be regular server messages)
+                    continue
+                    
+            except socket.timeout:
+                # Timeout is expected, continue monitoring
+                continue
             except Exception as e:
                 if self.running:
                     print(f"Election monitor error: {e}")
+                    
+    def _handle_election_message(self, message: dict, sender_addr):
+        """Handle incoming election messages"""
+        msg_type = message.get('type')
+        
+        if msg_type == MessageType.HEARTBEAT.value:
+            self._handle_heartbeat(message, sender_addr)
+        elif msg_type == MessageType.ELECTION.value:
+            self._handle_election_request(message, sender_addr)
+        elif msg_type == MessageType.ANSWER.value:
+            self._handle_election_answer(message, sender_addr)
+        elif msg_type == MessageType.COORDINATOR.value:
+            self._handle_coordinator_message(message, sender_addr)
+        elif msg_type == MessageType.HEARTBEAT_ACK.value:
+            self._handle_heartbeat_ack(message, sender_addr)
+            
+    def _handle_heartbeat(self, message: dict, sender_addr):
+        """Handle heartbeat message from leader"""
+        leader_id_str = message.get('leader')
+        if leader_id_str:
+            # Update last heartbeat time
+            self.last_heartbeat_time = time.time()
+            
+            # If we don't have a leader or it's a different leader, update
+            if not self.current_leader or str(self.current_leader) != leader_id_str:
+                # Parse leader ID
+                parts = leader_id_str.split(':')
+                if len(parts) >= 3:
+                    leader_ip = parts[0]
+                    leader_port = int(parts[1])
+                    leader_pid = int(parts[2])
+                    self.current_leader = NodeIdentifier(leader_ip, leader_port, leader_pid)
+                    self.state = NodeState.FOLLOWER
+                    print(f"👑 Recognized leader: {self.current_leader}")
+            
+            # Send heartbeat ACK back to leader
+            self._send_heartbeat_ack(sender_addr)
+            
+    def _handle_election_request(self, message: dict, sender_addr):
+        """Handle election request from another node"""
+        sender_id_str = message.get('sender')
+        if sender_id_str:
+            # Parse sender ID
+            parts = sender_id_str.split(':')
+            if len(parts) >= 3:
+                sender_ip = parts[0]
+                sender_port = int(parts[1])
+                sender_pid = int(parts[2])
+                sender_node = NodeIdentifier(sender_ip, sender_port, sender_pid)
+                
+                # If sender has lower priority, ignore
+                # If sender has higher priority, send answer and start our own election
+                if sender_node < self.node_id:
+                    # We have higher priority, send answer
+                    self._send_election_answer(sender_addr)
+                    # Also start our own election if not already in progress
+                    if not self.election_in_progress:
+                        self.trigger_election("higher_priority_node")
+                        
+    def _handle_election_answer(self, message: dict, sender_addr):
+        """Handle answer to our election request"""
+        # Higher priority node responded, we should not become leader
+        print(f"📨 Received election answer from higher priority node")
+        
+    def _handle_coordinator_message(self, message: dict, sender_addr):
+        """Handle coordinator announcement from new leader"""
+        leader_id_str = message.get('leader')
+        if leader_id_str:
+            # Parse leader ID
+            parts = leader_id_str.split(':')
+            if len(parts) >= 3:
+                leader_ip = parts[0]
+                leader_port = int(parts[1])
+                leader_pid = int(parts[2])
+                new_leader = NodeIdentifier(leader_ip, leader_port, leader_pid)
+                
+                self.current_leader = new_leader
+                self.state = NodeState.FOLLOWER
+                self.last_heartbeat_time = time.time()
+                print(f"👑 New leader elected: {new_leader}")
+                
+    def _handle_heartbeat_ack(self, message: dict, sender_addr):
+        """Handle heartbeat acknowledgment from follower"""
+        # For now, just log - could be used for leader to track active followers
+        pass
+        
+    def _send_heartbeat_ack(self, leader_addr):
+        """Send heartbeat acknowledgment to leader"""
+        message = {
+            'type': MessageType.HEARTBEAT_ACK.value,
+            'sender': str(self.node_id),
+            'timestamp': time.time()
+        }
+        
+        try:
+            self.socket.sendto(json.dumps(message).encode(), leader_addr)
+        except Exception as e:
+            print(f"Failed to send heartbeat ACK: {e}")
+            
+    def _send_election_answer(self, requester_addr):
+        """Send answer to election request"""
+        message = {
+            'type': MessageType.ANSWER.value,
+            'sender': str(self.node_id),
+            'timestamp': time.time()
+        }
+        
+        try:
+            self.socket.sendto(json.dumps(message).encode(), requester_addr)
+        except Exception as e:
+            print(f"Failed to send election answer: {e}")
                     
     def _heartbeat_monitor(self):
         """Monitor leader heartbeats and detect failures"""

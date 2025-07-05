@@ -4,7 +4,7 @@ Simple Chat Client
 - UDP multicast communication
 - Basic chat functionality
 
-Version: 0.2.0
+Version: 0.3.0
 """
 
 import socket
@@ -12,7 +12,7 @@ import threading
 import time
 
 # Version
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 # Configuration
 MULTICAST_IP = '224.1.1.1'
@@ -27,6 +27,12 @@ class ChatClient:
         self.socket = None
         self.listener_socket = None
         self.running = False
+        
+        # Heartbeat configuration
+        self.heartbeat_interval = 7.0  # Send heartbeat every 7 seconds
+        self.server_timeout = 20.0     # Consider server dead after 20 seconds
+        self.last_server_response = time.time()
+        self.connected_to_server = False
         
         print(f"Chat Client starting...")
         print(f"Version: {VERSION}")
@@ -69,6 +75,8 @@ class ChatClient:
             try:
                 response, server_addr = self.socket.recvfrom(BUFFER_SIZE)
                 print(f"✅ {response.decode()}")
+                self.last_server_response = time.time()
+                self.connected_to_server = True
                 return True
             except socket.timeout:
                 print("⚠️  No response from servers - but continuing anyway")
@@ -88,6 +96,8 @@ class ChatClient:
             try:
                 response, server_addr = self.socket.recvfrom(BUFFER_SIZE)
                 print(f"✅ {response.decode()}")
+                self.last_server_response = time.time()
+                self.connected_to_server = True
             except socket.timeout:
                 print("⚠️  No response from server")
                 
@@ -102,11 +112,82 @@ class ChatClient:
             try:
                 response, server_addr = self.socket.recvfrom(BUFFER_SIZE)
                 print(f"📊 {response.decode()}")
+                self.last_server_response = time.time()
+                self.connected_to_server = True
             except socket.timeout:
                 print("⚠️  No status response")
                 
         except Exception as e:
             print(f"❌ Status request failed: {e}")
+    
+    def send_heartbeat(self):
+        """Send heartbeat to server"""
+        try:
+            heartbeat_message = f"client_heartbeat:{self.username}:{self.group}"
+            self.socket.sendto(heartbeat_message.encode(), MULTICAST_GROUP)
+            
+            # Don't wait for response to avoid blocking - heartbeat should be fire-and-forget
+            # Server response tracking happens in other methods
+            
+        except Exception as e:
+            print(f"❌ Heartbeat send failed: {e}")
+    
+    def heartbeat_monitor(self):
+        """Monitor server connection and send heartbeats"""
+        while self.running:
+            try:
+                # Send heartbeat
+                self.send_heartbeat()
+                
+                # Check if server is still responding
+                if self.connected_to_server:
+                    time_since_response = time.time() - self.last_server_response
+                    if time_since_response > self.server_timeout:
+                        print(f"💀 Server appears dead (no response for {time_since_response:.1f}s)")
+                        self.connected_to_server = False
+                        self.attempt_reconnection()
+                
+                time.sleep(self.heartbeat_interval)
+                
+            except Exception as e:
+                if self.running:
+                    print(f"❌ Heartbeat monitor error: {e}")
+                    
+    def attempt_reconnection(self):
+        """Attempt to reconnect to server"""
+        print("🔄 Attempting to reconnect to server...")
+        
+        # Try to rejoin the chat
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                print(f"🔄 Reconnection attempt {attempt + 1}/{max_retries}")
+                
+                # Send join message again
+                join_message = f"join:{self.username}:{self.group}"
+                self.socket.sendto(join_message.encode(), MULTICAST_GROUP)
+                
+                # Wait for response with shorter timeout
+                try:
+                    self.socket.settimeout(3)  # Shorter timeout for reconnection
+                    response, server_addr = self.socket.recvfrom(BUFFER_SIZE)
+                    print(f"✅ Reconnected! {response.decode()}")
+                    self.last_server_response = time.time()
+                    self.connected_to_server = True
+                    self.socket.settimeout(5)  # Restore original timeout
+                    return True
+                except socket.timeout:
+                    print(f"⚠️  No response on attempt {attempt + 1}")
+                    continue
+                    
+            except Exception as e:
+                print(f"❌ Reconnection attempt {attempt + 1} failed: {e}")
+                
+            time.sleep(2)  # Wait before next attempt
+            
+        print("💀 All reconnection attempts failed")
+        self.socket.settimeout(5)  # Restore original timeout
+        return False
     
     def message_listener(self):
         """Thread function to listen for incoming messages"""
@@ -143,6 +224,11 @@ class ChatClient:
         # Start message listener thread
         listener_thread = threading.Thread(target=self.message_listener, daemon=True)
         listener_thread.start()
+        
+        # Start heartbeat monitor thread
+        heartbeat_thread = threading.Thread(target=self.heartbeat_monitor, daemon=True)
+        heartbeat_thread.start()
+        print(f"💓 Heartbeat monitor started (interval: {self.heartbeat_interval}s)")
         
         print(f"\n🚀 Connected to chat! Commands:")
         print(f"  - Type messages to chat")
