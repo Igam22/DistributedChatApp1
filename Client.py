@@ -3,11 +3,16 @@
 Simple Chat Client
 - UDP multicast communication
 - Basic chat functionality
+
+Version: 0.2.0
 """
 
 import socket
 import threading
 import time
+
+# Version
+VERSION = "0.2.0"
 
 # Configuration
 MULTICAST_IP = '224.1.1.1'
@@ -24,6 +29,7 @@ class ChatClient:
         self.running = False
         
         print(f"Chat Client starting...")
+        print(f"Version: {VERSION}")
         print(f"Username: {self.username}")
         print(f"Group: {self.group}")
     

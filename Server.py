@@ -4,6 +4,8 @@ Simple Distributed Chat Server
 - UDP multicast communication
 - Basic server discovery
 - Clean, minimal implementation
+
+Version: 0.2.0
 """
 
 import socket
@@ -11,7 +13,14 @@ import threading
 import time
 import json
 import hashlib
+import os
 from datetime import datetime
+
+# Leader Election imports - commented out for now
+# from LeaderElection import LeaderElection, NodeIdentifier
+
+# Version
+VERSION = "0.2.0"
 
 # Configuration
 MULTICAST_IP = '224.1.1.1'
@@ -51,10 +60,21 @@ class ChatServer:
         self.receiver_socket = None
         self.sender_socket = None
         
+        # Leader Election - commented out for now
+        # Initialize leader election system
+        # self.node_id = NodeIdentifier(self.ip, MULTICAST_PORT, os.getpid())
+        # self.leader_election = LeaderElection(self.node_id, MULTICAST_GROUP)
+        # self.is_leader = False
+        
         print(f"Chat Server starting...")
+        print(f"Version: {VERSION}")
         print(f"Server ID: {self.server_id}")
         print(f"IP: {self.ip}")
         print(f"Hostname: {self.hostname}")
+        
+        # Leader Election: Display node identification
+        # print(f"Node ID: {self.node_id}")
+        # print(f"Process ID: {os.getpid()}")
     
     def setup_sockets(self):
         """Setup UDP multicast sockets"""
@@ -107,6 +127,15 @@ class ChatServer:
                             'last_seen': time.time()
                         }
                         print(f"📡 Discovered server: {server_hostname} (ID: {server_id}) at {server_ip}")
+                        
+                        # Leader Election: Handle new server join
+                        # self.leader_election.handle_new_server_join({
+                        #     'ip': server_ip,
+                        #     'hostname': server_hostname,
+                        #     'server_id': server_id,
+                        #     'port': MULTICAST_PORT,
+                        #     'process_id': server_id  # Using server_id as process_id approximation
+                        # })
             
             elif message.startswith("join:"):
                 # Handle client join
@@ -261,6 +290,20 @@ class ChatServer:
         print(f"Active Groups: {len(groups)}")
         for group_name, members in groups.items():
             print(f"  - {group_name}: {len(members)} members")
+            
+        # Leader Election: Display leader information
+        # if hasattr(self, 'leader_election'):
+        #     current_leader = self.leader_election.get_leader()
+        #     node_state = self.leader_election.get_state()
+        #     group_view = self.leader_election.get_group_view()
+        #     
+        #     print(f"Leader Election Status:")
+        #     print(f"  - Current Leader: {current_leader if current_leader else 'None'}")
+        #     print(f"  - Node State: {node_state.value}")
+        #     print(f"  - Is Leader: {'Yes' if self.leader_election.is_leader() else 'No'}")
+        #     print(f"  - Group View ID: {group_view.get_view_id()}")
+        #     print(f"  - Known Nodes: {len(group_view.get_members())}")
+            
         print("="*50 + "\n")
     
     def status_thread(self):
@@ -281,6 +324,13 @@ class ChatServer:
             'last_seen': time.time()
         }
         
+        # Leader Election: Start leader election system
+        # print("🗳️  Starting leader election system...")
+        # if self.leader_election.start():
+        #     print("✅ Leader election system started")
+        # else:
+        #     print("❌ Leader election system failed to start")
+        
         # Start threads
         threads = [
             threading.Thread(target=self.message_receiver, daemon=True),
@@ -295,6 +345,10 @@ class ChatServer:
         print("🚀 Server started successfully!")
         self.show_status()
         
+        # Leader Election: Trigger initial election after system start
+        # print("🗳️  Triggering initial election...")
+        # self.leader_election.trigger_election("system_start")
+        
         try:
             # Keep main thread alive
             while self.running:
@@ -306,6 +360,12 @@ class ChatServer:
     def stop(self):
         """Stop the server"""
         self.running = False
+        
+        # Leader Election: Stop leader election system
+        # if hasattr(self, 'leader_election'):
+        #     print("🗳️  Stopping leader election system...")
+        #     self.leader_election.stop()
+        
         if self.receiver_socket:
             self.receiver_socket.close()
         if self.sender_socket:
