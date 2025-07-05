@@ -199,8 +199,22 @@ class ChatClient:
                     
                     # Only show messages that start with our group prefix
                     if message.startswith(f"[{self.group}]"):
-                        print(f"\n{message}")
-                        print(f"{self.username}> ", end="", flush=True)
+                        # Extract the username from the message to avoid showing our own messages
+                        try:
+                            # Format: [group] username: content
+                            parts = message.split("] ", 1)
+                            if len(parts) > 1:
+                                username_and_content = parts[1]
+                                username = username_and_content.split(":", 1)[0].strip()
+                                
+                                # Don't show our own messages
+                                if username != self.username:
+                                    print(f"\n{message}")
+                                    print(f"{self.username}> ", end="", flush=True)
+                        except:
+                            # If parsing fails, show the message anyway
+                            print(f"\n{message}")
+                            print(f"{self.username}> ", end="", flush=True)
                         
                 except socket.timeout:
                     continue

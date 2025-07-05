@@ -283,19 +283,34 @@ class LeaderElection:
         
         print(f"🗳️  Node {self.node_id} starting election")
         
+        # Wait a random delay to avoid simultaneous elections
+        import random
+        delay = random.uniform(0.5, 2.0)  # Random delay between 0.5-2 seconds
+        print(f"🕐 Election delay: {delay:.1f}s to avoid race conditions")
+        time.sleep(delay)
+        
         # Get nodes with higher priority
         higher_nodes = self.group_view.get_higher_nodes(self.node_id)
         
         if not higher_nodes:
             # No higher priority nodes, we become leader
-            self._become_leader()
+            # But first check if someone else already became leader during our delay
+            if self.current_leader is None:
+                self._become_leader()
+            else:
+                print(f"🗳️  Leader already exists: {self.current_leader}, stepping down")
+                self.state = NodeState.FOLLOWER
         else:
             # Send election message to higher priority nodes
             responses = self._send_election_messages(higher_nodes)
             
             if not responses:
                 # No responses from higher nodes, we become leader
-                self._become_leader()
+                if self.current_leader is None:
+                    self._become_leader()
+                else:
+                    print(f"🗳️  Leader already exists: {self.current_leader}, stepping down")
+                    self.state = NodeState.FOLLOWER
             else:
                 # Higher nodes responded, wait for them to elect leader
                 self._wait_for_coordinator()

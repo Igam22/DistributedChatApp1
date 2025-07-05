@@ -223,15 +223,16 @@ class ChatServer:
                     
                     print(f"💬 Group message from {msg_username} in '{msg_group}': {msg_content}")
                     
-                    # Forward to all clients in the same group (except sender)
-                    if msg_group in groups:
-                        for client_addr in groups[msg_group]:
-                            if client_addr != sender_addr:
-                                forward_msg = f"[{msg_group}] {msg_username}: {msg_content}"
-                                try:
-                                    self.sender_socket.sendto(forward_msg.encode(), client_addr)
-                                except Exception as e:
-                                    print(f"Failed to forward message to {client_addr}: {e}")
+                    # Forward to all clients in the same group via multicast
+                    if msg_group in groups and len(groups[msg_group]) > 1:
+                        # Only forward if there are other clients in the group
+                        forward_msg = f"[{msg_group}] {msg_username}: {msg_content}"
+                        try:
+                            # Send to multicast group so all clients can receive
+                            self.sender_socket.sendto(forward_msg.encode(), MULTICAST_GROUP)
+                            print(f"📡 Forwarded message to group '{msg_group}' via multicast")
+                        except Exception as e:
+                            print(f"Failed to forward message to multicast: {e}")
                     
                     # Send acknowledgment to sender
                     response = f"Message sent to group '{msg_group}'"
