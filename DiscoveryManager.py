@@ -118,8 +118,13 @@ class DiscoveryManager:
         
         # Wait a bit more before triggering election to ensure all servers are ready
         time.sleep(3)
-        safe_print(f"Triggering election after startup discovery")
-        trigger_election()
+        
+        # Only trigger election if we found other servers
+        if len(self.discovered_servers) > 0:
+            safe_print(f"Triggering election after startup discovery - found {len(self.discovered_servers)} servers")
+            trigger_election()
+        else:
+            safe_print("No other servers found during startup discovery - running as single server")
     
     def _maintenance_discovery(self):
         """Ongoing discovery for maintenance"""

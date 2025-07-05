@@ -1,5 +1,6 @@
 import socket
 from resources.utils import group_view_servers
+from resources.utils import safe_print
 
 
 # Implementing a Bully leader election algorithm, method from: https://github.com/KimaruThagna/BullyAlgorithm/blob/master/bully.py 
@@ -7,7 +8,7 @@ def process_Pool(id,message_case=0):
     
     if message_case==1: # sending the election request, message=election
         highest_node=[]
-        for x in group_view_servers:
+        for x in group_view_servers.copy():
             if id<x:
                 highest_node.append(x) 
 
@@ -28,7 +29,7 @@ def sending_data(recepients,message): # recepients list and message to be sent
 
     if recepients is not None:# no empty list
         for node in recepients:
-            print(message+" sent to Node"+str(node)) # emulate send message via print
+            safe_print(message+" sent to Node"+str(node)) # emulate send message via print
 
 # Construct a node
 def node(myId):

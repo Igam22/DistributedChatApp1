@@ -15,11 +15,15 @@ class BullyLeaderElection:
         
     def get_higher_priority_servers(self):
         """Get servers with higher priority (higher IDs)"""
-        return [server for server in group_view_servers if server > self.server_id]
+        # Create a copy to avoid RuntimeError during iteration
+        servers_copy = group_view_servers.copy()
+        return [server for server in servers_copy if server > self.server_id]
     
     def get_lower_priority_servers(self):
         """Get servers with lower priority (lower IDs)"""
-        return [server for server in group_view_servers if server < self.server_id]
+        # Create a copy to avoid RuntimeError during iteration
+        servers_copy = group_view_servers.copy()
+        return [server for server in servers_copy if server < self.server_id]
     
     def send_election_message(self, target_servers):
         """Send ELECTION message to higher priority servers"""
@@ -52,7 +56,9 @@ class BullyLeaderElection:
             "sender_ip": self.server_ip
         }
         
-        for server in group_view_servers:
+        # Create a copy of the set to avoid RuntimeError during iteration
+        group_view_servers_copy = group_view_servers.copy()
+        for server in group_view_servers_copy:
             if server != self.server_id:
                 self.send_message(server, coordinator_msg)
     

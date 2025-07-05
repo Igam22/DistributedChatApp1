@@ -4,14 +4,15 @@ import time
 import json
 import hashlib
 import uuid
-import logging
 from typing import Dict, Set, Optional, Callable, Any, Tuple
 from collections import defaultdict, deque
-from resources.utils import MULTICAST_GROUP_ADDRESS, group_view_servers, current_leader
+from resources.utils import MULTICAST_GROUP_ADDRESS, group_view_servers, current_leader, safe_print
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Thread-safe logging using safe_print
+# Log levels: DEBUG, INFO, WARNING, ERROR
+def safe_log(level, message):
+    """Thread-safe logging function"""
+    safe_print(f"[{level}] {message}")
 
 class MessageType:
     """Message types for fault tolerance"""
@@ -85,6 +86,11 @@ class PartitionDetector:
         self.in_partition = False
         self.probe_responses: Dict[str, float] = {}
         
+        # Startup grace period to prevent false partition detection during startup
+        self.startup_time = time.time()
+        self.startup_grace_period = 30  # 30 seconds grace period
+        self.partition_detection_enabled = False
+        
     def add_known_node(self, node_id: str):
         """Add a node to the known nodes list"""
         self.known_nodes.add(node_id)
@@ -92,6 +98,19 @@ class PartitionDetector:
     def probe_nodes(self) -> bool:
         """Probe all known nodes to detect partitions"""
         self.reachable_nodes.clear()
+        
+        # Check if we're still in startup grace period
+        current_time = time.time()
+        if not self.partition_detection_enabled:
+            if current_time - self.startup_time < self.startup_grace_period:
+                # Still in startup grace period, don't detect partitions yet
+                safe_log("DEBUG", f"Partition detection disabled - still in startup grace period ({int(self.startup_grace_period - (current_time - self.startup_time))}s remaining)")
+                self.in_partition = False
+                return True
+            else:
+                # Grace period ended, enable partition detection
+                self.partition_detection_enabled = True
+                safe_log("INFO", "Startup grace period ended - enabling partition detection")
         
         # If we don't know about any other nodes yet, we're not in a partition
         total_nodes = len(self.known_nodes)
@@ -116,9 +135,9 @@ class PartitionDetector:
         if total_nodes > 1:  # Only check partitions when we have multiple nodes
             if self.in_partition and not was_in_partition:
                 self.partition_start_time = time.time()
-                logger.warning(f"Network partition detected! Reachable: {reachable_nodes}/{total_nodes}")
+                safe_log("WARNING", f"Network partition detected! Reachable: {reachable_nodes}/{total_nodes}")
             elif not self.in_partition and was_in_partition:
-                logger.info(f"Partition healed! Reachable: {reachable_nodes}/{total_nodes}")
+                safe_log("INFO", f"Partition healed! Reachable: {reachable_nodes}/{total_nodes}")
                 self.partition_start_time = None
         
         return not self.in_partition
@@ -127,7 +146,8 @@ class PartitionDetector:
         """Probe a specific node"""
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(2)
+            # Increased timeout to 5 seconds to prevent timing out on servers still initializing
+            sock.settimeout(5)
             
             probe_msg = {
                 'type': MessageType.PARTITION_PROBE,
@@ -147,7 +167,7 @@ class PartitionDetector:
                 return True
                 
         except Exception as e:
-            logger.debug(f"Failed to probe node {node_id}: {e}")
+            safe_log("DEBUG", f"Failed to probe node {node_id}: {e}")
         finally:
             sock.close()
         
@@ -201,7 +221,7 @@ class FaultToleranceManager:
             return
             
         self.running = True
-        logger.info(f"Starting fault tolerance for {self.node_type} {self.node_id}")
+        safe_log("INFO", f"Starting fault tolerance for {self.node_type} {self.node_id}")
         
         # Start threads
         self.threads['heartbeat'] = threading.Thread(target=self._heartbeat_loop, daemon=True)
@@ -220,7 +240,7 @@ class FaultToleranceManager:
         self.running = False
         for thread in self.threads.values():
             thread.join(timeout=1)
-        logger.info(f"Stopped fault tolerance for {self.node_id}")
+        safe_log("INFO", f"Stopped fault tolerance for {self.node_id}")
     
     def send_reliable_message(self, msg_type: str, payload: Any, target_nodes: Set[str] = None) -> str:
         """Send a reliable message with acknowledgment"""
@@ -232,7 +252,7 @@ class FaultToleranceManager:
         # Send message
         self._transmit_message(message, target_nodes)
         
-        logger.debug(f"Sent reliable message {message.msg_id} type {msg_type}")
+        safe_log("DEBUG", f"Sent reliable message {message.msg_id} type {msg_type}")
         return message.msg_id
     
     def handle_message(self, raw_message: str, sender_addr: Tuple[str, int]) -> Optional[Dict]:
@@ -258,14 +278,14 @@ class FaultToleranceManager:
                 if self._validate_message(data):
                     return data
                 else:
-                    logger.warning(f"Invalid message from {sender_addr}: {data}")
+                    safe_log("WARNING", f"Invalid message from {sender_addr}: {data}")
                     self.fault_stats[FaultType.BYZANTINE] += 1
                     
         except json.JSONDecodeError:
-            logger.warning(f"Corrupted message from {sender_addr}: {raw_message}")
+            safe_log("WARNING", f"Corrupted message from {sender_addr}: {raw_message}")
             self.fault_stats[FaultType.BYZANTINE] += 1
         except Exception as e:
-            logger.error(f"Error handling message from {sender_addr}: {e}")
+            safe_log("ERROR", f"Error handling message from {sender_addr}: {e}")
             self.fault_stats[FaultType.OMISSION] += 1
         
         return None
@@ -307,7 +327,7 @@ class FaultToleranceManager:
             sock.close()
             
         except Exception as e:
-            logger.error(f"Failed to transmit message {message.msg_id}: {e}")
+            safe_log("ERROR", f"Failed to transmit message {message.msg_id}: {e}")
             self.fault_stats[FaultType.OMISSION] += 1
     
     def _handle_heartbeat(self, data: Dict, sender_addr: Tuple[str, int]) -> Dict:
@@ -327,7 +347,7 @@ class FaultToleranceManager:
         msg_id = data.get('msg_id')
         if msg_id and msg_id in self.pending_messages:
             del self.pending_messages[msg_id]
-            logger.debug(f"Received ACK for message {msg_id}")
+            safe_log("DEBUG", f"Received ACK for message {msg_id}")
     
     def _handle_reliable_message(self, data: Dict, sender_addr: Tuple[str, int]) -> Optional[Dict]:
         """Handle reliable message"""
@@ -337,14 +357,14 @@ class FaultToleranceManager:
             
             # Check for duplicate
             if message.msg_id in self.received_messages:
-                logger.debug(f"Duplicate message {message.msg_id} from {message.sender_id}")
+                safe_log("DEBUG", f"Duplicate message {message.msg_id} from {message.sender_id}")
                 # Send ACK anyway
                 self._send_ack(message.msg_id, sender_addr)
                 return None
             
             # Verify integrity
             if not message.verify_integrity():
-                logger.warning(f"Message integrity check failed for {message.msg_id}")
+                safe_log("WARNING", f"Message integrity check failed for {message.msg_id}")
                 self.fault_stats[FaultType.BYZANTINE] += 1
                 return None
             
@@ -354,7 +374,7 @@ class FaultToleranceManager:
             # Send acknowledgment
             self._send_ack(message.msg_id, sender_addr)
             
-            logger.debug(f"Received reliable message {message.msg_id} from {message.sender_id}")
+            safe_log("DEBUG", f"Received reliable message {message.msg_id} from {message.sender_id}")
             return {
                 'type': 'reliable_message',
                 'message': message,
@@ -362,7 +382,7 @@ class FaultToleranceManager:
             }
             
         except Exception as e:
-            logger.error(f"Error handling reliable message: {e}")
+            safe_log("ERROR", f"Error handling reliable message: {e}")
             self.fault_stats[FaultType.OMISSION] += 1
             return None
     
@@ -371,7 +391,7 @@ class FaultToleranceManager:
         leader_id = data.get('sender_id')
         if leader_id == current_leader:
             self.leader_last_seen = time.time()
-            logger.debug(f"Received leader heartbeat from {leader_id}")
+            safe_log("DEBUG", f"Received leader heartbeat from {leader_id}")
     
     def _handle_partition_probe(self, data: Dict, sender_addr: Tuple[str, int]) -> Dict:
         """Handle partition probe"""
@@ -403,7 +423,7 @@ class FaultToleranceManager:
             sock.close()
             
         except Exception as e:
-            logger.error(f"Failed to send ACK for {msg_id}: {e}")
+            safe_log("ERROR", f"Failed to send ACK for {msg_id}: {e}")
     
     def _validate_message(self, data: Dict) -> bool:
         """Basic message validation"""
@@ -440,7 +460,7 @@ class FaultToleranceManager:
                 time.sleep(self.heartbeat_interval)
                 
             except Exception as e:
-                logger.error(f"Error in heartbeat loop: {e}")
+                safe_log("ERROR", f"Error in heartbeat loop: {e}")
                 time.sleep(self.heartbeat_interval)
     
     def _failure_detection_loop(self):
@@ -455,14 +475,14 @@ class FaultToleranceManager:
                         newly_failed.add(node_id)
                         self.failed_nodes.add(node_id)
                         self.fault_stats[FaultType.CRASH] += 1
-                        logger.warning(f"Node {node_id} failed (timeout)")
+                        safe_log("WARNING", f"Node {node_id} failed (timeout)")
                         
                         # Trigger recovery callback
                         if FaultType.CRASH in self.recovery_callbacks:
                             try:
                                 self.recovery_callbacks[FaultType.CRASH](node_id)
                             except Exception as e:
-                                logger.error(f"Error in crash recovery callback: {e}")
+                                safe_log("ERROR", f"Error in crash recovery callback: {e}")
             
             time.sleep(5)  # Check every 5 seconds
     
@@ -479,12 +499,12 @@ class FaultToleranceManager:
                         message.retry_count += 1
                         message.timestamp = current_time
                         self._transmit_message(message)
-                        logger.debug(f"Retrying message {msg_id} (attempt {message.retry_count})")
+                        safe_log("DEBUG", f"Retrying message {msg_id} (attempt {message.retry_count})")
                     else:
                         # Message failed
                         timed_out_messages.append(msg_id)
                         self.fault_stats[FaultType.OMISSION] += 1
-                        logger.warning(f"Message {msg_id} failed after {message.max_retries} retries")
+                        safe_log("WARNING", f"Message {msg_id} failed after {message.max_retries} retries")
             
             # Remove failed messages
             for msg_id in timed_out_messages:
@@ -506,12 +526,12 @@ class FaultToleranceManager:
                         try:
                             self.recovery_callbacks[FaultType.PARTITION](self.partition_detector)
                         except Exception as e:
-                            logger.error(f"Error in partition recovery callback: {e}")
+                            safe_log("ERROR", f"Error in partition recovery callback: {e}")
                 
                 time.sleep(self.partition_detector.probe_interval)
                 
             except Exception as e:
-                logger.error(f"Error in partition detection: {e}")
+                safe_log("ERROR", f"Error in partition detection: {e}")
                 time.sleep(self.partition_detector.probe_interval)
     
     def _leader_monitoring_loop(self):
@@ -519,14 +539,14 @@ class FaultToleranceManager:
         while self.running:
             if current_leader and self.leader_last_seen:
                 if time.time() - self.leader_last_seen > self.leader_timeout:
-                    logger.warning(f"Leader {current_leader} heartbeat timeout")
+                    safe_log("WARNING", f"Leader {current_leader} heartbeat timeout")
                     
                     # Trigger leader failure recovery
                     if FaultType.CRASH in self.recovery_callbacks:
                         try:
                             self.recovery_callbacks[FaultType.CRASH](current_leader)
                         except Exception as e:
-                            logger.error(f"Error in leader failure recovery: {e}")
+                            safe_log("ERROR", f"Error in leader failure recovery: {e}")
             
             time.sleep(self.leader_timeout / 2)
     

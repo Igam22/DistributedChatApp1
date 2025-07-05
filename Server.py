@@ -75,7 +75,8 @@ def probe_servers():
     This is a legacy function that works alongside the enhanced DiscoveryManager.
     """
     probe_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    probe_socket.settimeout(2)
+    # Increased timeout to 5 seconds for better reliability during startup
+    probe_socket.settimeout(5)
     
     # Send probe message with our server details
     probe_msg = f"SERVER_PROBE:{server_ip}:{server_id}"
@@ -224,9 +225,14 @@ def multicast_receiver():
                             
                             safe_print(f"Discovered server: {server_name} at {server_ip} (ID: {discovered_server_id})")
                             
-                            # Trigger election when new server joins
-                            if len(group_view_servers) > 1:
-                                trigger_election()
+                            # Only trigger election if we have fault tolerance enabled and partition detection is ready
+                            ft_manager = get_fault_tolerance_manager()
+                            if ft_manager and ft_manager.partition_detector.partition_detection_enabled:
+                                # Trigger election when new server joins, but only after startup grace period
+                                if len(group_view_servers) > 1:
+                                    trigger_election()
+                            else:
+                                safe_print("Delaying election trigger until fault tolerance is ready")
                         else:
                             safe_print(f"Ignoring own announcement from {server_name} (ID: {discovered_server_id})")
                     continue  # Don't send response for server announcements
@@ -328,8 +334,8 @@ if __name__ == '__main__':
         total_known_nodes = len(partition_detector.known_nodes)
         reachable_nodes = len(partition_detector.reachable_nodes)
         
-        # Only process partition events if we have multiple nodes in the system
-        if total_known_nodes > 1:
+        # Only process partition events if we have multiple nodes in the system and partition detection is enabled
+        if total_known_nodes > 1 and partition_detector.partition_detection_enabled:
             if partition_detector.in_partition:
                 safe_print(f"⚠️  Network partition detected! Reachable: {reachable_nodes}/{total_known_nodes}")
                 safe_print("   Entering partition mode - pausing leader election until healed")
@@ -337,6 +343,8 @@ if __name__ == '__main__':
                 safe_print(f"✅ Network partition healed! Reachable: {reachable_nodes}/{total_known_nodes}")
                 safe_print("   Resuming normal operation and triggering leader election")
                 trigger_election()
+        elif not partition_detector.partition_detection_enabled:
+            safe_print(f"Partition detection disabled - ignoring partition status during startup grace period")
     
     ft_manager.register_recovery_callback('crash', on_crash_recovery)
     ft_manager.register_recovery_callback('partition', on_partition_recovery)
@@ -368,15 +376,18 @@ if __name__ == '__main__':
     server_last_seen[server_id] = time.time()
     group_view.add_participant(str(server_id), 'server', (server_ip, 0), socket.gethostname())
     
-    # Start fault tolerance
+    # Start fault tolerance first
     ft_manager.start()
+    
+    # Start integrated multicast receiver early so we can receive messages
+    receiver_thread = threading.Thread(target=multicast_receiver, daemon=True)
+    receiver_thread.start()
+    
+    # Wait a moment for receiver to initialize
+    time.sleep(1)
     
     # Start enhanced discovery (this will handle timing and elections)
     discovery_manager.start_discovery()
-    
-    # Start integrated multicast receiver
-    receiver_thread = threading.Thread(target=multicast_receiver, daemon=True)
-    receiver_thread.start()
     
     safe_print("Server startup complete with fault tolerance enabled")
     safe_print("Discovery statistics:")
