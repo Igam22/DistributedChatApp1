@@ -17,7 +17,7 @@ import os
 from datetime import datetime
 
 # Leader Election imports - commented out for now
-# from LeaderElection import LeaderElection, NodeIdentifier
+from LeaderElection import LeaderElection, NodeIdentifier
 
 # Version
 VERSION = "0.2.0"
@@ -62,9 +62,9 @@ class ChatServer:
         
         # Leader Election - commented out for now
         # Initialize leader election system
-        # self.node_id = NodeIdentifier(self.ip, MULTICAST_PORT, os.getpid())
-        # self.leader_election = LeaderElection(self.node_id, MULTICAST_GROUP)
-        # self.is_leader = False
+        self.node_id = NodeIdentifier(self.ip, MULTICAST_PORT, os.getpid())
+        self.leader_election = LeaderElection(self.node_id, MULTICAST_GROUP)
+        self.is_leader = False
         
         print(f"Chat Server starting...")
         print(f"Version: {VERSION}")
@@ -73,8 +73,8 @@ class ChatServer:
         print(f"Hostname: {self.hostname}")
         
         # Leader Election: Display node identification
-        # print(f"Node ID: {self.node_id}")
-        # print(f"Process ID: {os.getpid()}")
+        print(f"Node ID: {self.node_id}")
+        print(f"Process ID: {os.getpid()}")
     
     def setup_sockets(self):
         """Setup UDP multicast sockets"""
@@ -129,13 +129,13 @@ class ChatServer:
                         print(f"📡 Discovered server: {server_hostname} (ID: {server_id}) at {server_ip}")
                         
                         # Leader Election: Handle new server join
-                        # self.leader_election.handle_new_server_join({
-                        #     'ip': server_ip,
-                        #     'hostname': server_hostname,
-                        #     'server_id': server_id,
-                        #     'port': MULTICAST_PORT,
-                        #     'process_id': server_id  # Using server_id as process_id approximation
-                        # })
+                        self.leader_election.handle_new_server_join({
+                             'ip': server_ip,
+                             'hostname': server_hostname,
+                             'server_id': server_id,
+                             'port': MULTICAST_PORT,
+                             'process_id': server_id  # Using server_id as process_id approximation
+                         })
             
             elif message.startswith("join:"):
                 # Handle client join
@@ -292,17 +292,17 @@ class ChatServer:
             print(f"  - {group_name}: {len(members)} members")
             
         # Leader Election: Display leader information
-        # if hasattr(self, 'leader_election'):
-        #     current_leader = self.leader_election.get_leader()
-        #     node_state = self.leader_election.get_state()
-        #     group_view = self.leader_election.get_group_view()
-        #     
-        #     print(f"Leader Election Status:")
-        #     print(f"  - Current Leader: {current_leader if current_leader else 'None'}")
-        #     print(f"  - Node State: {node_state.value}")
-        #     print(f"  - Is Leader: {'Yes' if self.leader_election.is_leader() else 'No'}")
-        #     print(f"  - Group View ID: {group_view.get_view_id()}")
-        #     print(f"  - Known Nodes: {len(group_view.get_members())}")
+        if hasattr(self, 'leader_election'):
+             current_leader = self.leader_election.get_leader()
+             node_state = self.leader_election.get_state()
+             group_view = self.leader_election.get_group_view()
+             
+             print(f"Leader Election Status:")
+             print(f"  - Current Leader: {current_leader if current_leader else 'None'}")
+             print(f"  - Node State: {node_state.value}")
+             print(f"  - Is Leader: {'Yes' if self.leader_election.is_leader() else 'No'}")
+             print(f"  - Group View ID: {group_view.get_view_id()}")
+             print(f"  - Known Nodes: {len(group_view.get_members())}")
             
         print("="*50 + "\n")
     
@@ -325,11 +325,11 @@ class ChatServer:
         }
         
         # Leader Election: Start leader election system
-        # print("🗳️  Starting leader election system...")
-        # if self.leader_election.start():
-        #     print("✅ Leader election system started")
-        # else:
-        #     print("❌ Leader election system failed to start")
+        print("🗳️  Starting leader election system...")
+        if self.leader_election.start():
+             print("✅ Leader election system started")
+        else:
+             print("❌ Leader election system failed to start")
         
         # Start threads
         threads = [
@@ -346,8 +346,8 @@ class ChatServer:
         self.show_status()
         
         # Leader Election: Trigger initial election after system start
-        # print("🗳️  Triggering initial election...")
-        # self.leader_election.trigger_election("system_start")
+        print("🗳️  Triggering initial election...")
+        self.leader_election.trigger_election("system_start")
         
         try:
             # Keep main thread alive
@@ -362,9 +362,9 @@ class ChatServer:
         self.running = False
         
         # Leader Election: Stop leader election system
-        # if hasattr(self, 'leader_election'):
-        #     print("🗳️  Stopping leader election system...")
-        #     self.leader_election.stop()
+        if hasattr(self, 'leader_election'):
+            print("🗳️  Stopping leader election system...")
+            self.leader_election.stop()
         
         if self.receiver_socket:
             self.receiver_socket.close()
